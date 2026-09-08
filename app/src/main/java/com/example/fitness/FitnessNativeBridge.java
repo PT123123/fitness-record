@@ -9,6 +9,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
+import android.media.MediaPlayer;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -35,10 +38,13 @@ public class FitnessNativeBridge {
     private final Context app;
     private android.os.PowerManager.WakeLock wakeLock;
     private Vibrator vibrator;
+    private MediaPlayer alarmPlayer;      // 直接播放系统闹铃音（不依赖通知权限）
+    private static FitnessNativeBridge sInstance;
 
     public FitnessNativeBridge(MainActivity activity) {
         this.activity = activity;
         this.app = activity.getApplicationContext();
+        sInstance = this;
         ensureChannel();
     }
 
@@ -49,8 +55,9 @@ public class FitnessNativeBridge {
         final int restSeconds = parseRest(json);
         final boolean isTest = parseTest(json);
         runOnUi(() -> {
+            startAlarmSound();                    // ⑥ 直接播放系统闹铃音（先响，不依赖通知权限）
             showLockScreenAlarm(restSeconds, isTest); // ① 锁屏全屏弹窗（最核心）
-            showHeadsUpNotification(restSeconds); // ② 高优先级通知（下拉/状态栏）
+            showHeadsUpNotification(restSeconds); // ② 高优先级通知（下拉/状态栏，静音）
             tryStartOverlay();                    // ③ 悬浮窗（需授权，可选）
             startVibrate();                       // ④ 持续震动
             acquireWakeLock();                    // ⑤ 点亮屏幕并保持
@@ -60,6 +67,7 @@ public class FitnessNativeBridge {
     @JavascriptInterface
     public void dismiss() {
         runOnUi(() -> {
+            stopAlarmSound();
             stopVibrate();
             releaseWakeLock();
             cancelNotification();
@@ -139,15 +147,11 @@ public class FitnessNativeBridge {
                 .setFullScreenIntent(pi, true)   // Android 10- 锁屏直接展开
                 .setVibrate(pattern);
 
-        // Android 8+ 设置提示音/震动通道
+        // Android 8+ 设置提示音/震动通道；本通知自身静音，声音由 startAlarmSound() 直接播放
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            AudioAttributes aa = new AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .build();
-            b.setSound(Settings.System.DEFAULT_ALARM_ALERT_URI, aa);
+            b.setSound(null, null);
         } else {
-            b.setSound(Settings.System.DEFAULT_ALARM_ALERT_URI);
+            b.setSound(null);
         }
         nm.notify(NOTIFY_ID, b.build());
     }
@@ -201,6 +205,42 @@ public class FitnessNativeBridge {
     private void cancelNotification() {
         NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(NOTIFY_ID);
+    }
+
+    /* ==================== ⑥ 系统闹铃音：MediaPlayer 直接播放，不依赖通知权限 ==================== */
+    private void startAlarmSound() {
+        try {
+            stopAlarmSound();
+            Uri uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
+            if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            if (uri == null) { Log.w(TAG, "no alarm uri"); return; }
+            MediaPlayer p = new MediaPlayer();
+            p.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+            p.setDataSource(app, uri);
+            p.setLooping(true);
+            p.prepare();
+            p.start();
+            alarmPlayer = p;
+        } catch (Throwable t) { Log.w(TAG, "alarm sound fail", t); }
+    }
+
+    private void stopAlarmSound() {
+        try {
+            if (alarmPlayer != null) {
+                alarmPlayer.stop();
+                alarmPlayer.release();
+                alarmPlayer = null;
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** AlarmActivity 关闭（记录/再休息/关闭）时停掉闹铃音 */
+    public static void stopAlarmSoundStatic() {
+        try { if (sInstance != null) sInstance.stopAlarmSound(); } catch (Throwable ignored) {}
     }
 
     /* ==================== 工具 ==================== */

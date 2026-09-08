@@ -644,8 +644,8 @@ function renderSettings(){
     <div class="card" style="background:var(--card2)">
       <div class="field-label">为什么休息结束没有系统提醒？</div>
       <p style="color:var(--sub);font-size:13px;line-height:1.7">
-        ${isNative? '当前为安卓 App，提醒走系统通知；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
-        Android 13+ 未授予「通知权限」时系统不弹提醒也不响铃，点上方「去授权」即可；
+        ${isNative? '当前为安卓 App，提醒直接播放系统闹铃音；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
+        若仍听不到声音，请确认系统「闹钟/媒体音量」未静音、勿扰模式未拦截，并点上方「去授权」检查通知权限；
         休息时若把 App 退到后台，网页计时可能被系统节流、提醒会延迟，建议保持前台；
         点「测试系统提醒」可立即验证整条链路。
       </p>
