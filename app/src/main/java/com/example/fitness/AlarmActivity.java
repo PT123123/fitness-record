@@ -102,6 +102,7 @@ public class AlarmActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopVibrate();
+        FitnessNativeBridge.stopAlarmSoundStatic(); // 关闭弹窗即停闹铃音
         if (sInstance == this) sInstance = null;
         super.onDestroy();
     }
