@@ -1,6 +1,7 @@
 package com.example.fitness;
 
 import android.app.Activity;
+import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.VibrationEffect;
@@ -102,13 +103,13 @@ public class AlarmActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopVibrate();
-        FitnessNativeBridge.stopAlarmSoundStatic(); // 关闭弹窗即停闹铃音
+        Reminder.stopSoundNow(); // 关闭弹窗即停闹铃音/震动/唤醒
         if (sInstance == this) sInstance = null;
         super.onDestroy();
     }
 
-    /** 供 Bridge.dismiss() 在其它线程关闭弹窗 */
-    static void dismiss(Activity context) {
+    /** 供 Reminder.dismiss() 在其它线程关闭弹窗 */
+    static void dismiss(Context context) {
         if (sInstance != null) {
             try { sInstance.finish(); } catch (Throwable ignored) {}
         }
