@@ -1,0 +1,17 @@
+# Gradle 构建产物与缓存
+.gradle/
+build/
+app/build/
+captures/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 构建/崩溃日志
+*.log
+
+# 本地备份（非交付物）
+_backup/

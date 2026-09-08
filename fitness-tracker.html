@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>健身训练记录</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root{
+    --bg:#121212; --card:#1e1e1e; --card2:#262626; --line:#333;
+    --txt:#eee; --sub:#999; --acc:#4fc3f7; --acc2:#2e9e5b; --warn:#ef5350; --chip:#333;
+  }
+  body{ font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg); color:var(--txt); line-height:1.5; padding-bottom:70px; padding-top:56px; }
+  .wrap{ max-width:560px; margin:0 auto; padding:14px; }
+
+  /* tabs */
+  .tabs{ position:fixed; bottom:0; left:0; right:0; max-width:560px; margin:0 auto;
+    display:flex; background:#1a1a1a; border-top:1px solid var(--line); z-index:50; }
+  .tabs button{ flex:1; padding:12px 0; background:none; border:none; color:var(--sub);
+    font-size:13px; }
+  .tabs button.on{ color:var(--acc); font-weight:600; border-top:2px solid var(--acc); }
+
+  /* 顶栏 */
+  .topbar{ position:fixed; top:0; left:0; right:0; max-width:560px; margin:0 auto; height:52px;
+    display:flex; align-items:center; justify-content:space-between; background:#1a1a1a;
+    border-bottom:1px solid var(--line); z-index:60; padding:0 6px; }
+  .tb-btn{ background:none; border:none; color:var(--txt); font-size:21px; width:44px; height:44px;
+    border-radius:10px; cursor:pointer; line-height:1; }
+  .tb-btn:active{ background:var(--card2); }
+  .tb-title{ font-size:16px; font-weight:700; }
+
+  /* 侧边栏 */
+  .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:65; opacity:0;
+    pointer-events:none; transition:opacity .25s; }
+  .backdrop.show{ opacity:1; pointer-events:auto; }
+  .sidebar{ position:fixed; top:0; left:0; bottom:0; width:264px; background:#171717;
+    border-right:1px solid var(--line); z-index:70; transform:translateX(-105%);
+    transition:transform .25s ease; display:flex; flex-direction:column; padding:10px 12px; }
+  .sidebar.open{ transform:translateX(0); }
+  .sb-head{ display:flex; align-items:center; justify-content:space-between; padding:8px 2px 14px;
+    border-bottom:1px solid var(--line); margin-bottom:12px; }
+  .sb-title{ font-size:15px; font-weight:700; }
+  .sb-nav{ display:flex; flex-direction:column; gap:6px; }
+  .sb-nav button{ text-align:left; padding:13px 14px; border:none; background:none; color:var(--txt);
+    font-size:15px; border-radius:10px; cursor:pointer; }
+  .sb-nav button.on{ background:rgba(79,195,247,.12); color:var(--acc); font-weight:600; }
+  .sb-stats{ margin-top:auto; padding:14px; background:var(--card2); border-radius:12px;
+    font-size:13px; color:var(--sub); line-height:1.7; }
+  .sb-stats b{ color:var(--acc); }
+  .sb-foot{ padding:12px 4px 4px; color:#666; font-size:12px; text-align:center; }
+
+  /* 闹铃 */
+  .sel{ background:var(--card2); color:var(--txt); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:15px; }
+  .alarm-item{ background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+    display:flex; align-items:center; gap:12px; }
+  .alarm-item.off{ opacity:.45; }
+  .alarm-time{ font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .alarm-badge{ font-size:11px; color:var(--acc); background:rgba(79,195,247,.12); padding:2px 8px;
+    border-radius:10px; margin-left:8px; vertical-align:2px; font-weight:500; }
+  .alarm-label{ color:var(--sub); font-size:13px; margin-top:2px; }
+  .switch{ position:relative; width:46px; height:26px; display:inline-block; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{ position:absolute; inset:0; background:var(--chip); border-radius:26px; transition:.2s; cursor:pointer; }
+  .slider:before{ content:''; position:absolute; width:20px; height:20px; left:3px; top:3px;
+    background:#888; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider{ background:var(--acc); }
+  .switch input:checked + .slider:before{ transform:translateX(20px); background:#001; }
+
+  /* 响铃弹窗 */
+  #ring-modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.65); z-index:80; }
+  .ring-card{ background:var(--card); border-radius:18px; padding:26px; width:min(320px,82vw);
+    text-align:center; border:1px solid var(--acc); box-shadow:0 12px 44px rgba(0,0,0,.5); }
+  .ring-icon{ font-size:52px; animation:pulse 1s infinite; }
+  .ring-time{ font-size:46px; font-weight:800; font-variant-numeric:tabular-nums; margin:8px 0 2px; color:var(--acc); }
+  .ring-label{ color:var(--sub); margin-bottom:18px; font-size:15px; }
+
+  h2{ font-size:16px; margin:4px 2px 12px; }
+  .card{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; }
+
+  /* timer */
+  .mode-toggle{ display:flex; gap:8px; margin-bottom:12px; }
+  .mode-toggle button{ flex:1; padding:9px; border-radius:10px; border:1px solid var(--line);
+    background:var(--card2); color:var(--sub); font-size:14px; }
+  .mode-toggle button.on{ background:var(--acc); color:#001; border-color:var(--acc); font-weight:600; }
+  .time-display{ font-size:64px; font-weight:700; text-align:center; letter-spacing:2px;
+    font-variant-numeric:tabular-nums; margin:6px 0; }
+  .time-sub{ text-align:center; color:var(--sub); font-size:13px; margin-bottom:14px; }
+  .btn-row{ display:flex; gap:10px; margin-bottom:6px; }
+  .btn{ flex:1; padding:16px; border:none; border-radius:12px; font-size:16px; font-weight:600; }
+  .btn-primary{ background:var(--acc); color:#001; }
+  .btn-stop{ background:var(--warn); color:#fff; }
+  .btn-ghost{ background:var(--card2); color:var(--txt); }
+  .btn-green{ background:var(--acc2); color:#fff; }
+  .btn:disabled{ opacity:.35; }
+
+  .set-btn{ width:100%; padding:18px; margin-top:8px; border:2px dashed var(--acc);
+    background:rgba(79,195,247,.08); color:var(--acc); border-radius:12px; font-size:17px; font-weight:700; }
+
+  .dur-set{ display:flex; align-items:center; gap:10px; justify-content:center; margin:8px 0 14px; }
+  .dur-set select{ background:var(--card2); color:var(--txt); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:15px; }
+
+  /* 组记录列表 */
+  .group-hint{ color:var(--sub); font-size:13px; margin:14px 2px 8px; display:flex; justify-content:space-between; align-items:center; }
+  .group-hint .save-all{ color:var(--acc2); font-weight:600; font-size:14px; }
+  .group-item{ background:var(--card2); border-radius:12px; margin-bottom:8px; overflow:hidden; }
+  .group-head{ display:flex; align-items:center; padding:12px 14px; gap:10px; }
+  .group-head .gidx{ font-weight:700; color:var(--acc); min-width:110px; }
+  .group-head .gtime{ color:var(--sub); font-size:13px; font-variant-numeric:tabular-nums; }
+  .group-head .gsplit{ color:var(--sub); font-size:12px; margin-left:6px; }
+  .group-head .gsummary{ flex:1; text-align:right; font-size:14px; }
+  .group-head .garrow{ color:var(--sub); margin-left:6px; transition:.2s; }
+  .group-head.edited .gsummary{ color:var(--txt); }
+  .empty{ color:var(--sub); text-align:center; padding:18px; font-size:14px; }
+
+  /* 组内联编辑 */
+  .group-edit{ padding:0 14px 14px; border-top:1px solid var(--line); }
+  .field-label{ font-size:12px; color:var(--sub); margin:12px 0 6px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{ padding:8px 14px; background:var(--chip); border-radius:20px; font-size:14px; cursor:pointer; }
+  .chip.on{ background:var(--acc); color:#001; font-weight:600; }
+  .inline-input{ width:100%; background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    color:var(--txt); padding:11px 12px; font-size:15px; margin-top:6px; }
+  .row2{ display:flex; gap:10px; }
+  .row2 .inline-input{ flex:1; }
+  .edit-actions{ display:flex; gap:10px; margin-top:14px; }
+  .edit-actions .btn{ padding:12px; font-size:15px; }
+
+  /* 到期记录条 */
+  .finish-bar{ background:var(--warn); color:#fff; border-radius:12px; padding:14px; margin-top:12px;
+    text-align:center; font-weight:600; animation:pulse 1.2s infinite; cursor:pointer; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.65;} }
+
+  /* 记录/历史 */
+  .rec-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .rec-head .rh-title{ font-size:15px; font-weight:600; }
+  .rec-head .rh-close{ color:var(--warn); font-size:14px; font-weight:600; background:none; border:none; padding:4px 8px; }
+  .preview{ background:var(--card2); border-radius:10px; padding:12px; margin:10px 0;
+    color:var(--acc); font-size:15px; }
+  .hist-date{ font-size:13px; color:var(--sub); margin:16px 2px 8px; }
+  .hist-item{ background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+    display:flex; align-items:flex-start; gap:10px; }
+  .hist-item .h-time{ color:var(--sub); font-size:12px; min-width:52px; }
+  .hist-item .h-body{ flex:1; font-size:15px; }
+  .hist-item .h-tag{ display:inline-block; background:var(--chip); color:var(--acc); border-radius:6px;
+    padding:1px 7px; font-size:12px; margin-right:6px; }
+  .del{ color:var(--warn); font-size:18px; padding:0 4px; background:none; border:none; }
+
+  /* 导出 */
+  pre{ background:#0a0a0a; border-radius:12px; padding:14px; font-size:13px; white-space:pre-wrap;
+    word-break:break-all; max-height:60vh; overflow:auto; }
+  .section-title{ font-size:14px; color:var(--sub); margin:14px 2px 8px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <button class="tb-btn" onclick="openSidebar()" aria-label="菜单">☰</button>
+  <div class="tb-title">🏋️ 健身训练记录</div>
+  <button class="tb-btn" onclick="switchTab('alarm')" aria-label="闹铃">⏰</button>
+</div>
+<div class="backdrop" id="backdrop" onclick="closeSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sb-head">
+    <div class="sb-title">🏋️ 健身训练记录</div>
+    <button class="tb-btn" onclick="closeSidebar()" aria-label="关闭">✕</button>
+  </div>
+  <nav class="sb-nav">
+    <button data-tab="timer" onclick="goTab('timer')">⏱ 计时器</button>
+    <button data-tab="alarm" onclick="goTab('alarm')">⏰ 闹铃</button>
+    <button data-tab="export" onclick="goTab('export')">📤 导出</button>
+  </nav>
+  <div class="sb-stats" id="sb-stats"></div>
+  <div class="sb-foot">数据保存在本机 · 无需联网</div>
+</aside>
+<div class="wrap" id="app"></div>
+<div class="tabs">
+  <button data-tab="timer" class="on">⏱ 计时器</button>
+  <button data-tab="alarm">⏰ 闹铃</button>
+  <button data-tab="export">📤 导出</button>
+</div>
+<div id="ring-modal"></div>
+
+<script>
+/* ============ 预设 ============ */
+const PARTS = ['胸','背','腿','肩','腹'];
+const ACTIONS = {
+  '胸':['杠铃卧推','哑铃卧推','上斜卧推','飞鸟','双杠臂屈伸'],
+  '背':['引体向上','高位下拉','杠铃划船','单臂划船','硬拉'],
+  '腿':['深蹲','半蹲','器械深蹲','腿举','箭步蹲','罗马尼亚硬拉'],
+  '肩':['哑铃推举','侧平举','前平举','俯身飞鸟','耸肩'],
+  '腹':['悬挂举腿','山羊挺身','卷腹','平板支撑','悬垂提膝'],
+};
+const REST_OPTIONS = [30,45,60,90,120,150,180,240,300];
+
+/* ============ 工具 ============ */
+const $=id=>document.getElementById(id);
+function fmt(ms){ const s=Math.floor(ms/1000); const m=Math.floor(s/60); return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+function fmtRest(sec){ if(!sec) return ''; if(sec>=60 && sec%60===0) return `休息${sec/60}分钟，`; return `休息${sec}秒，`; }
+/* 统一格式：休息x，[部位] 动作 重量*次数下，笔记（来自笔记） */
+function fmtRecordLine(r){
+  const rest = fmtRest(r.rest);
+  const part = r.part ? `[${r.part}] ` : '';
+  const action = r.action || '';
+  const repsNum = String(r.reps||'').replace(/rm$/i,'');
+  let detail='';
+  if(r.weight && repsNum) detail = ` ${r.weight}kg*${repsNum}下`;
+  else if(repsNum) detail = ` ${repsNum}下`;
+  else if(r.weight) detail = ` ${r.weight}kg`;
+  const note = r.note ? `，${r.note}（来自笔记）` : '';
+  return `${rest}${part}${action}${detail}${note}`.replace(/\s+$/,'');
+}
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+function today(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function nowTime(){ const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+/* ============ 状态 ============ */
+let state = {
+  tab:'timer',
+  mode:'countup',
+  running:false,
+  elapsed:0,
+  cdTotal:180,
+  cdLeft:180,
+  startedAt:0,
+  lastLapAt:0,
+  groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t}
+  editingIdx:null,
+  records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
+  alarms:[],          // {id,time,label,repeat:'once'|'daily',enabled,lastFired}
+  ringing:null,       // {id,label,time,until}
+};
+let showManual = false;
+let recDraft = { part:'', action:'', rest:60, reps:'', weight:'', note:'', t:'' };
+const LS = 'fitness_records_v5';
+let groupDefaults = { part:'', action:'', reps:'', weight:'' };
+
+function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
+  if(d.records) state.records=d.records; if(d.groups) state.groups=d.groups;
+  if(d.alarms) state.alarms=d.alarms;
+  if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
+  if(d.showManual!=null) showManual=d.showManual;
+  if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
+  // 兼容旧组：补上 rest / t
+  state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
+}catch(e){} }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, alarms:state.alarms})); }
+
+/* ============ 组命名：动作+第N组，换动作重新数 ============ */
+function actionGroupNo(g){
+  let n=0;
+  for(const x of state.groups){ if(x.action && x.action===g.action) n++; if(x===g) return n; }
+  return 0;
+}
+function groupLabel(g){
+  const i = state.groups.indexOf(g);
+  if(g.action) return `${g.action} 第${actionGroupNo(g)}组`;
+  return `第${i+1}组`;
+}
+function groupDetail(g){
+  const p = g.part ? `[${g.part}] ` : '';
+  const parts=[];
+  if(g.reps) parts.push(String(g.reps).match(/rm$/i)? g.reps : g.reps+'rm');
+  if(g.weight) parts.push(g.weight+'kg');
+  if(g.rest) parts.push(fmtRest(g.rest).replace(/，$/,''));
+  if(g.note) parts.push(g.note);
+  return p + parts.join(' ');
+}
+
+/* ============ 计时器核心 ============ */
+let timerId=null;
+function tick(){
+  const now=Date.now();
+  if(state.mode==='countup'){
+    if(state.running) state.elapsed = now - state.startedAt;
+    setTime(fmt(state.elapsed), `累计训练时长 · 已记 ${state.groups.length} 组`);
+  } else {
+    const passed = (now - state.startedAt)/1000;
+    state.cdLeft = Math.max(0, state.cdTotal - passed);
+    const passedMs = (state.cdTotal - state.cdLeft)*1000;
+    setTime(fmt(state.cdLeft*1000), `倒计时剩余 · 已用时 ${fmt(passedMs)}${state.cdTotal?` / 总计 ${fmt(state.cdTotal*1000)}`:''}`);
+    if(state.cdLeft<=0 && state.running){ finishCountdown(); Native.fire({ restSeconds: state.cdTotal, label:'休息结束', at: nowTime() }); }
+  }
+}
+function setTime(disp, sub){
+  const el=$('time-display'), sb=$('time-sub');
+  if(el) el.textContent=disp; if(sb) sb.textContent=sub;
+}
+function startTimer(){
+  state.running=true;
+  state.startedAt = Date.now() - (state.mode==='countup'? state.elapsed : (state.cdTotal-state.cdLeft)*1000);
+  if(state.lastLapAt===0) state.lastLapAt = state.mode==='countup'? state.elapsed : 0;
+  timerId = setInterval(tick, 200);
+  renderTimer();
+}
+function pauseTimer(){ state.running=false; clearInterval(timerId); renderTimer(); }
+function resetTimer(){
+  state.running=false; clearInterval(timerId);
+  state.elapsed=0; state.cdLeft=state.cdTotal; state.lastLapAt=0;
+  renderTimer();
+}
+function setMode(m){
+  if(state.running) pauseTimer();
+  state.mode=m;
+  if(m==='countup'){ state.elapsed=0; state.lastLapAt=0; }
+  else { state.cdLeft=state.cdTotal; }
+  renderTimer();
+}
+/* 供安卓原生弹窗「再休息 X 分钟」回调：切到倒计时并启动 */
+window.restartCountdown = function(seconds){
+  seconds = parseInt(seconds)||60;
+  state.cdTotal = seconds;
+  setMode('countdown');
+  startTimer();
+};
+function getCurrent(){ return state.mode==='countup'? state.elapsed : (state.cdTotal-state.cdLeft)*1000; }
+
+/* 新增一组（正计时/倒计时共用），自动继承上一组动作，并记录当前时间 */
+function addGroup(extra){
+  const cur = getCurrent();
+  const split = state.lastLapAt ? cur - state.lastLapAt : cur;
+  const g = Object.assign({
+    idx: state.groups.length+1, cumul:cur, split:split,
+    part:groupDefaults.part, action:groupDefaults.action,
+    reps:groupDefaults.reps, weight:groupDefaults.weight,
+    note:'', rest: Math.round(split/1000), t: nowTime(), done:false
+  }, extra||{});
+  state.groups.push(g);
+  state.lastLapAt = cur;
+  state.editingIdx = state.groups.length-1;
+  persist(); renderTimer();
+}
+function lap(){
+  const cur = getCurrent();
+  if(!state.running && cur===0){ startTimer(); return; }
+  addGroup({});
+}
+/* 倒计时休息结束 → 直接并入同一份组记录，并自动选上一组动作 + 记录此刻时间 */
+function recordRestGroup(){
+  Native.dismiss();                 // 关掉锁屏弹窗 / 停止震动
+  const restSec = Math.round(state.cdTotal);
+  const restMs = restSec*1000;
+  addGroup({ split:restMs, rest:restSec, cumul: state.elapsed + restMs });
+  // 记录完回到正计时，准备下一组
+  state.mode='countup';
+  state.elapsed=0; state.cdLeft=state.cdTotal;
+  state.running=false; clearInterval(timerId);
+  renderTimer();
+}
+function finishCountdown(){ state.running=false; clearInterval(timerId); renderTimer(); }
+
+/* ============ 组编辑 ============ */
+function updateGroup(idx, patch){ Object.assign(state.groups[idx], patch);
+  ['part','action','reps','weight'].forEach(k=>{ if(patch[k]!==undefined) groupDefaults[k]=patch[k]; });
+  persist(); renderTimer(); }
+function toggleEdit(i){ state.editingIdx = state.editingIdx===i? null : i; renderTimer(); }
+function closeEdit(){ state.editingIdx=null; renderTimer(); }
+function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
+function pickAction(i,a){ updateGroup(i,{action:a}); }
+function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
+function setCdMin(v){ state.cdTotal = parseInt(v)*60 + (state.cdTotal%60); state.cdLeft=state.cdTotal; renderTimer(); }
+function setCdSec(v){ state.cdTotal = Math.floor(state.cdTotal/60)*60 + parseInt(v); state.cdLeft=state.cdTotal; renderTimer(); }
+
+function saveGroupsToHistory(){
+  const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
+  if(valid.length===0){ alert('还没有填写任何组哦（至少选个动作）'); return; }
+  valid.forEach(g=>{
+    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'timer',
+      part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
+      reps:g.reps, weight:g.weight, note:g.note });
+  });
+  state.groups=[]; state.editingIdx=null;
+  persist(); renderTimer(); renderExport();
+}
+
+/* ============ 焦点保持（防止输入时软键盘收回）============ */
+let _focus = null;
+function captureFocus(){
+  const a = document.activeElement;
+  if(!a || !a.dataset || !a.dataset.fid || !a.closest('#app')){ _focus=null; return; }
+  let start=0, end=0; try{ start=a.selectionStart||0; end=a.selectionEnd||0; }catch(e){}
+  _focus = { fid:a.dataset.fid, start, end };
+}
+function restoreFocus(){
+  if(!_focus) return;
+  const el = document.querySelector('#app [data-fid="'+_focus.fid+'"]');
+  if(el){ el.focus(); try{ el.setSelectionRange(_focus.start, _focus.end); }catch(e){} }
+  _focus = null;
+}
+
+/* ============ 渲染：计时器（含记录/历史）============ */
+function renderGroupEdit(i){
+  const g=state.groups[i];
+  const fid=id=> `data-fid="g-${i}-${id}"`;
+  return `<div class="group-edit">
+    <div class="field-label">部位</div>
+    <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
+    <div class="field-label">动作（点选预设，也可自己打）</div>
+    <div class="chips">${(ACTIONS[g.part]||[]).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
+    <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
+    <div class="row2" style="margin-top:10px">
+      <div style="flex:1"><div class="field-label">次数 (RM)</div>
+        <input class="inline-input" type="number" ${fid('reps')} placeholder="7" value="${g.reps||''}" oninput="updateGroup(${i},{reps:this.value})"></div>
+      <div style="flex:1"><div class="field-label">重量 kg</div>
+        <input class="inline-input" type="number" ${fid('weight')} placeholder="100" value="${g.weight||''}" oninput="updateGroup(${i},{weight:this.value})"></div>
+    </div>
+    <div class="field-label">休息时间（秒，可手动填 / 点选预设）</div>
+    <input class="inline-input" type="number" min="0" ${fid('rest')} placeholder="180" value="${g.rest||''}" oninput="updateGroup(${i},{rest:parseInt(this.value)||0})">
+    <div class="chips" style="margin-top:8px">${REST_OPTIONS.slice(0,7).map(r=>`<span class="chip ${g.rest==r?'on':''}" onclick="updateGroup(${i},{rest:${r}})">${r}秒</span>`).join('')}</div>
+    <div class="field-label">笔记（如：好酸 / 状态不错）</div>
+    <input class="inline-input" ${fid('note')} placeholder="可选" value="${g.note||''}" oninput="updateGroup(${i},{note:this.value})">
+    <div class="edit-actions">
+      <button class="btn btn-green" onclick="closeEdit()">✔ 完成</button>
+      <button class="btn btn-ghost" onclick="removeGroup(${i})">删除这组</button>
+    </div>
+  </div>`;
+}
+
+function renderTimer(){
+  captureFocus();
+  const s=state;
+  let html=`<h2>⏱ 计时器</h2><div class="card">`;
+  html+=`<div class="mode-toggle">
+    <button class="${s.mode==='countup'?'on':''}" onclick="setMode('countup')">▶ 正计时（训练）</button>
+    <button class="${s.mode==='countdown'?'on':''}" onclick="setMode('countdown')">⏳ 倒计时（休息）</button>
+  </div>`;
+
+  if(s.mode==='countdown'){
+    html+=`<div class="dur-set"><span style="color:var(--sub)">时长</span>
+      <select onchange="setCdMin(this.value)">${[0,1,2,3,5,10,15,20,25,30].map(m=>`<option ${s.cdTotal/60==m?'selected':''}>${m}</option>`).join('')}</select> 分
+      <select onchange="setCdSec(this.value)">${[0,15,30,45].map(sec=>`<option ${s.cdTotal%60==sec?'selected':''}>${sec}</option>`).join('')}</select> 秒
+    </div>`;
+  }
+
+  if(s.mode==='countup'){
+    html+=`<div class="time-display" id="time-display">${fmt(s.elapsed)}</div>
+      <div class="time-sub" id="time-sub">累计训练时长 · 已记 ${s.groups.length} 组</div>`;
+  } else {
+    const passedMs = (s.cdTotal - s.cdLeft)*1000;
+    html+=`<div class="time-display" id="time-display">${fmt(s.cdLeft*1000)}</div>
+      <div class="time-sub" id="time-sub">倒计时剩余 · 已用时 ${fmt(passedMs)}${s.cdTotal?` / 总计 ${fmt(s.cdTotal*1000)}`:''}</div>`;
+  }
+
+  if(s.running){
+    html+=`<div class="btn-row">
+      <button class="btn btn-stop" onclick="pauseTimer()">⏸ 暂停</button>
+      <button class="btn btn-ghost" onclick="resetTimer()">↺ 重置</button>
+    </div>`;
+  } else {
+    html+=`<div class="btn-row">
+      <button class="btn btn-primary" onclick="startTimer()">${s.elapsed>0||(s.mode==='countdown'&&s.cdLeft<s.cdTotal)?'▶ 继续':'▶ 开始'}</button>
+      <button class="btn btn-ghost" onclick="resetTimer()">↺ 重置</button>
+    </div>`;
+  }
+
+  html+=`<button class="set-btn" onclick="lap()">＋ 记一组</button>`;
+
+  if(s.mode==='countdown' && !s.running && s.cdLeft<=0){
+    html+=`<div class="finish-bar" onclick="recordRestGroup()">⏰ 休息结束 · 记录这组 →</div>`;
+  }
+  html+=`</div>`;
+
+  // ★ 组记录列表（正计时 / 倒计时 共享同一份）
+  {
+    html+=`<div class="group-hint"><span>本次组别（点击任一组填写动作/笔记）</span>`;
+    if(s.groups.length>0) html+=`<span class="save-all" onclick="saveGroupsToHistory()">保存到记录 ↓</span>`;
+    html+=`</div>`;
+    if(s.groups.length===0){
+      html+=`<div class="empty">做完一组点「＋ 记一组」，这里会累积记录<br>每组都能点开编辑</div>`;
+    } else {
+      [...s.groups].reverse().forEach(g=>{
+        const realIdx = state.groups.indexOf(g);
+        const edited = g.part || g.action || g.reps || g.weight || g.note;
+        const detail = groupDetail(g);
+        html+=`<div class="group-item">
+          <div class="group-head ${edited?'edited':''}" onclick="toggleEdit(${realIdx})">
+            <span class="gidx">${groupLabel(g)}</span>
+            <span class="gtime">${g.t||''}</span>
+            <span class="gsplit">+${fmt(g.split)}</span>
+            <span class="gsummary">${edited? (detail||g.action||'已记录') : '<span style="color:var(--sub)">点击填写动作</span>'}</span>
+            <span class="garrow">${state.editingIdx===realIdx?'▴':'▾'}</span>
+          </div>`;
+        if(state.editingIdx===realIdx) html+= renderGroupEdit(realIdx);
+        html+=`</div>`;
+      });
+    }
+  }
+
+  html += renderRecordSection();
+
+  $('app').innerHTML = html;
+  restoreFocus();
+}
+
+/* ============ 记录区（手动补录 + 历史）============ */
+function recPreviewText(){
+  const d=recDraft;
+  const timeTxt = d.t? d.t+' ' : '';
+  const restTxt = fmtRest(d.rest);
+  const rmTxt = d.reps? (String(d.reps).match(/rm$/i)? d.reps : d.reps+'rm') : '';
+  const wTxt = d.weight? d.weight+'kg' : '';
+  const main = [d.action, rmTxt, wTxt, d.note].filter(Boolean).join(' ');
+  return (d.part||main)? `${timeTxt}${restTxt}${d.part? '['+d.part+'] ' : ''}${main}` : '休息3分钟，器械深蹲 7rm';
+}
+function updateRecPreview(){ const prev=$('rec-preview'); if(prev) prev.textContent=recPreviewText(); }
+
+function renderRecordSection(){
+  const d=recDraft;
+  let html=`<div class="section-title">📝 记录（手动补录 + 历史，与计时器同一份）</div>`;
+
+  if(showManual){
+    html+=`<div class="card">
+      <div class="rec-head">
+        <span class="rh-title">✏️ 手动补录 <span style="color:var(--sub);font-weight:400;font-size:12px">· 当前 ${nowTime()}</span></span>
+        <button class="rh-close" onclick="toggleManual()">收起 ▴</button>
+      </div>
+      <div class="row2">
+        <div style="flex:1"><div class="field-label">记录时间</div>
+          <input class="inline-input" type="time" value="${d.t||nowTime()}" oninput="recDraft.t=this.value;updateRecPreview()"></div>
+        <div style="flex:1"><div class="field-label">休息（秒，可手动填）</div>
+          <input class="inline-input" type="number" min="0" placeholder="180" value="${d.rest||''}" oninput="recDraft.rest=parseInt(this.value)||0;updateRecPreview()"></div>
+      </div>
+      <div class="chips" style="margin-top:8px">${REST_OPTIONS.map(r=>`<span class="chip ${d.rest==r?'on':''}" onclick="recDraft.rest=${r};renderTimer()">${fmtRest(r)||r+'秒'}</span>`).join('')}</div>
+      <div class="field-label">部位</div>
+      <div class="chips">${PARTS.map(p=>`<span class="chip ${d.part===p?'on':''}" onclick="recPickPart('${p}')">${p}</span>`).join('')}</div>
+      <div class="field-label">动作</div>
+      <div class="chips">${(ACTIONS[d.part]||[]).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
+      <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview()">
+      <div class="row2" style="margin-top:12px">
+        <div style="flex:1"><div class="field-label">次数(RM)</div>
+          <input class="inline-input" type="number" placeholder="7" value="${d.reps||''}" oninput="recDraft.reps=this.value;updateRecPreview()"></div>
+        <div style="flex:1"><div class="field-label">重量(kg)</div>
+          <input class="inline-input" type="number" placeholder="100" value="${d.weight||''}" oninput="recDraft.weight=this.value;updateRecPreview()"></div>
+      </div>
+      <div class="field-label">笔记</div>
+      <input class="inline-input" placeholder="好酸" value="${d.note||''}" oninput="recDraft.note=this.value;updateRecPreview()">
+      <div class="preview" id="rec-preview">${recPreviewText()}</div>
+      <button class="btn btn-green" style="width:100%" onclick="addManual()">＋ 加入记录</button>
+    </div>`;
+  } else {
+    html+=`<button class="btn btn-ghost" style="width:100%;margin-bottom:14px" onclick="toggleManual()">＋ 手动补录一条</button>`;
+  }
+
+  html+=`<div class="section-title">记录历史</div>`;
+  if(state.records.length===0){ html+=`<div class="empty">还没有记录，去做第一组吧 💪</div>`; }
+  else {
+    let lastDate='';
+    state.records.forEach(r=>{
+      if(r.date!==lastDate){ html+=`<div class="hist-date">📅 ${r.date}</div>`; lastDate=r.date; }
+      const line = fmtRecordLine(r);
+      html+=`<div class="hist-item">
+        <span class="h-time">${r.t}</span>
+        <span class="h-body">${line}</span>
+        <button class="del" onclick="delRecord('${r.id}')">×</button>
+      </div>`;
+    });
+  }
+  return html;
+}
+function toggleManual(){ showManual=!showManual; persist(); renderTimer(); }
+function recPickPart(p){ recDraft.part=p; if(!(ACTIONS[p]||[]).includes(recDraft.action)) recDraft.action=''; persist(); renderTimer(); }
+function recPickAction(a){ recDraft.action=a; persist(); renderTimer(); }
+function addManual(){
+  const d=recDraft;
+  if(!d.part && !d.action && !d.reps && !d.note){ alert('至少填个动作吧'); return; }
+  const recTime = d.t || nowTime();
+  state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual',
+    part:d.part, action:d.action, rest:d.rest, reps:d.reps, weight:d.weight, note:d.note });
+  d.reps=''; d.weight=''; d.note=''; d.t='';   // 保留部位/动作/休息，方便连记
+  persist(); renderTimer(); renderExport();
+}
+function delRecord(id){ state.records=state.records.filter(r=>r.id!==id); persist(); renderTimer(); renderExport(); }
+
+/* ============ 导出（每次点开自动预览）============ */
+function buildExportText(){
+  let txt='🏋️ 健身训练记录\n'+'='.repeat(40)+'\n\n';
+  const items=[];
+  state.groups.forEach(g=>{
+    if(!(g.part||g.action||g.reps||g.note)) return;
+    items.push({ date:today(), t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight||'', note:g.note||'' });
+  });
+  state.records.forEach(r=> items.push({ date:r.date, t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight||'', note:r.note||'' }));
+  const byDate={};
+  items.forEach(it=>{ (byDate[it.date]=byDate[it.date]||[]).push(it); });
+  const dates=Object.keys(byDate).sort();
+  if(dates.length===0){ txt+='（暂无记录）\n'; return txt; }
+  dates.forEach(date=>{
+    txt+=`📅 ${date}\n`;
+    byDate[date].forEach(r=>{
+      const timePrefix = r.t? r.t+' ' : '';
+      txt+=`  ${timePrefix}${fmtRecordLine(r)}\n`;
+    });
+  });
+  return txt;
+}
+function renderExport(){
+  if(state.tab!=='export') return;
+  const txt = buildExportText();
+  $('app').innerHTML=`<h2>📤 导出</h2>
+    <div class="card">
+      <p style="color:var(--sub);font-size:14px">纯文本预览，可粘贴到备忘录 / Notion / 微信等任意地方。</p>
+      <pre id="export-text">${txt}</pre>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
+    </div>`;
+}
+function copyExport(){ const t=$('export-text').textContent;
+  navigator.clipboard.writeText(t).then(()=>alert('已复制 ✔')).catch(()=>alert('复制失败，请手动选取')); }
+
+/* ============ 闹铃（到点响系统提醒音） ============ */
+function fmtClock(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function addAlarm(time,label,repeat){
+  if(!time){ alert('请选择闹铃时间'); return; }
+  if(state.alarms.some(a=>a.enabled && a.time===time)){ alert('已有一个相同时间的启用闹铃'); return; }
+  state.alarms.push({ id:uid(), time, label:label||time, repeat:repeat||'once', enabled:true, lastFired:'' });
+  persist(); renderAlarm(); refreshSidebar();
+  try{ if(window.Notification && Notification.permission==='default') Notification.requestPermission(); }catch(e){}
+}
+function addAlarmFromInputs(){
+  const t=$('alarm-time').value, l=($('alarm-label').value||'').trim(), r=$('alarm-repeat').value;
+  addAlarm(t,l,r);
+  const le=$('alarm-label'); if(le) le.value='';
+}
+function toggleAlarm(id){ const a=state.alarms.find(x=>x.id===id); if(!a) return;
+  a.enabled=!a.enabled; if(a.enabled) a.lastFired=''; persist(); renderAlarm(); refreshSidebar(); }
+function delAlarm(id){ state.alarms=state.alarms.filter(x=>x.id!==id); persist(); renderAlarm(); refreshSidebar(); }
+function nextAlarm(){
+  const now=new Date(); let best=null;
+  state.alarms.forEach(a=>{
+    if(!a.enabled) return;
+    const p=a.time.split(':').map(Number);
+    const d=new Date(now); d.setHours(p[0],p[1],0,0);
+    if(d<=now){ if(a.repeat!=='daily') return; d.setDate(d.getDate()+1); }
+    if(!best || d<best) best=d;
+  });
+  return best;
+}
+function renderAlarm(){
+  let html=`<h2>⏰ 闹铃</h2>
+    <div class="card">
+      <div class="field-label">新增闹铃（到点响铃 + 系统提醒音）</div>
+      <div class="row2">
+        <input class="inline-input" type="time" id="alarm-time" value="07:00">
+        <input class="inline-input" id="alarm-label" placeholder="备注，如：起床">
+      </div>
+      <div class="row2" style="margin-top:10px">
+        <select class="sel" id="alarm-repeat" style="flex:1">
+          <option value="once">仅响一次</option>
+          <option value="daily">每天重复</option>
+        </select>
+        <button class="btn btn-primary" onclick="addAlarmFromInputs()" style="padding:10px">＋ 添加</button>
+      </div>
+    </div>`;
+  html+=`<div class="section-title">闹铃列表</div>`;
+  if(state.alarms.length===0){
+    html+=`<div class="empty">还没有闹铃，设置一个吧 ⏰</div>`;
+  } else {
+    [...state.alarms].reverse().forEach(a=>{
+      html+=`<div class="alarm-item ${a.enabled?'':'off'}">
+        <div style="flex:1">
+          <div class="alarm-time">${a.time}<span class="alarm-badge">${a.repeat==='daily'?'每天':'仅一次'}</span></div>
+          <div class="alarm-label">${a.label||a.time}</div>
+        </div>
+        <label class="switch"><input type="checkbox" ${a.enabled?'checked':''} onchange="toggleAlarm('${a.id}')"><span class="slider"></span></label>
+        <button class="del" onclick="delAlarm('${a.id}')">×</button>
+      </div>`;
+    });
+  }
+  const na=nextAlarm();
+  html+=`<div class="empty" style="padding:12px">${na? '⏰ 下次响铃：'+fmtClock(na)+' · '+(na.getDate()===new Date().getDate()?'今天':'明天') : '🔕 暂无启用的闹铃'}</div>`;
+  $('app').innerHTML=html;
+}
+/* 提醒音：双音「叮咚」铃声，循环播放直到关闭；兼容安卓原生桥接 */
+let _actx=null;
+function actx(){ if(!_actx){ const C=window.AudioContext||window.webkitAudioContext; if(C) _actx=new C(); } return _actx; }
+function chime(){
+  const c=actx(); if(!c) return;
+  try{
+    if(c.state==='suspended') c.resume();
+    const t0=c.currentTime;
+    [[880,0],[1174.66,0.18]].forEach(([f,dt])=>{
+      const o=c.createOscillator(), g=c.createGain();
+      o.connect(g); g.connect(c.destination);
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001, t0+dt);
+      g.gain.exponentialRampToValueAtTime(0.35, t0+dt+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+dt+0.4);
+      o.start(t0+dt); o.stop(t0+dt+0.45);
+    });
+  }catch(e){}
+}
+let _ringTimer=null;
+function startRing(){ stopRing(); chime(); _ringTimer=setInterval(chime,1500);
+  try{ if(navigator.vibrate) navigator.vibrate([500,250,500,250,500,250,600]); }catch(e){} }
+function stopRing(){ if(_ringTimer){ clearInterval(_ringTimer); _ringTimer=null; }
+  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
+function fireAlarm(a){
+  startRing();
+  state.ringing={ id:a.id, label:a.label||a.time, time:a.time, until:Date.now()+30000 };
+  try{ if(window.FitnessNative && window.FitnessNative.fire) window.FitnessNative.fire(JSON.stringify({type:'alarm', label:state.ringing.label, time:a.time})); }catch(e){}
+  try{ if(window.Notification && Notification.permission==='granted')
+    new Notification('⏰ '+state.ringing.label, { body:a.time+' · 闹铃提醒', tag:'fitness-alarm-'+a.id }); }catch(e){}
+  renderRingModal();
+  if(state.tab==='alarm') renderAlarm();
+  setTimeout(()=>{ if(state.ringing && state.ringing.id===a.id) dismissRing(); }, 30000);
+}
+function renderRingModal(){
+  const box=$('ring-modal'); if(!box) return;
+  if(!state.ringing){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML=`<div class="ring-card">
+    <div class="ring-icon">⏰</div>
+    <div class="ring-time">${state.ringing.time}</div>
+    <div class="ring-label">${state.ringing.label}</div>
+    <button class="btn btn-primary" style="width:100%" onclick="dismissRing()">🔕 关闭闹铃</button>
+  </div>`;
+}
+function dismissRing(){
+  state.ringing=null; stopRing(); Native.dismiss(); renderRingModal();
+}
+function checkAlarms(){
+  const d=new Date();
+  const hm=fmtClock(d), key=today();
+  state.alarms.forEach(a=>{
+    if(!a.enabled || a.time!==hm || a.lastFired===key) return;
+    a.lastFired=key;
+    if(a.repeat!=='daily') a.enabled=false;
+    persist(); fireAlarm(a);
+  });
+}
+
+/* ============ 侧边栏 ============ */
+function openSidebar(){ $('sidebar').classList.add('open'); $('backdrop').classList.add('show'); refreshSidebar(); }
+function closeSidebar(){ $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show'); }
+function goTab(tab){ closeSidebar(); switchTab(tab); }
+function refreshSidebar(){
+  const el=$('sb-stats'); if(!el) return;
+  const on=state.alarms.filter(a=>a.enabled).length;
+  const na=nextAlarm();
+  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条<br>
+    启用闹铃 <b>${on}</b> 个${na? ' · 最近 ' + fmtClock(na) : ''}`;
+}
+
+/* ============ 原生桥接（安卓 App 强提醒）============
+ * 在 WebView 里，安卓会注入 window.FitnessNative（addJavascriptInterface）。
+ * 打包成 App 时：倒计时归零 → 原生弹「锁屏弹窗 + 悬浮窗 + 震动」。
+ * 在普通浏览器调试时：走降级（Notification + 震动 + 蜂鸣），保证不报错。
+ */
+window.FitnessNative = window.FitnessNative || null;
+const Native = {
+  fire(payload){                    // 倒计时归零 → 触发强提醒
+    if(window.FitnessNative && window.FitnessNative.fire) try{ window.FitnessNative.fire(JSON.stringify(payload)); return true; }catch(e){}
+    return this._fallbackFire(payload);
+  },
+  dismiss(){                        // 用户点了「记录这组 / 关闭」→ 关掉弹窗与震动
+    if(window.FitnessNative && window.FitnessNative.dismiss) try{ window.FitnessNative.dismiss(); }catch(e){}
+  },
+  _fallbackFire(p){
+    try{ if(window.Notification && Notification.permission==='granted')
+      new Notification('休息结束', { body:`${p.label||'计时器'} · ${p.restSeconds||''}秒`, tag:'fitness-alarm' }); }catch(e){}
+    try{ if(navigator.vibrate) navigator.vibrate([600,200,600,200,600,200,600]); }catch(e){}
+    try{ const C=window.AudioContext||window.webkitAudioContext; if(C){ const c=new C();
+      const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination);
+      o.type='sine'; o.frequency.value=880; g.gain.value=0.3; o.start(); setTimeout(()=>o.stop(),1500);} }catch(e){}
+    return false;
+  }
+};
+
+/* ============ Tab 切换 ============ */
+function switchTab(tab){
+  state.tab=tab;
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
+  document.querySelectorAll('.sb-nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
+  if(tab==='timer') renderTimer();
+  else if(tab==='alarm') renderAlarm();
+  else if(tab==='export') renderExport();
+  refreshSidebar();
+}
+document.addEventListener('click', e=>{ const b=e.target.closest('.tabs button'); if(b) switchTab(b.dataset.tab); });
+
+/* ============ 初始化 ============ */
+function init(){
+  load(); renderTimer(); tick();
+  setInterval(checkAlarms,1000);
+  renderRingModal(); refreshSidebar();
+  document.addEventListener('pointerdown', ()=>{ try{ const c=actx(); if(c && c.state==='suspended') c.resume(); }catch(e){} }, {passive:true});
+  window.addEventListener('beforeunload', persist);
+}
+init();
+</script>
+</body>
+</html>

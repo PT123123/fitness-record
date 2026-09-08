@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="28dp"
+    android:background="#E61E1E">
+
+    <TextView
+        android:id="@+id/alarm_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="休息结束！"
+        android:textColor="#FFFFFF"
+        android:textSize="52sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/alarm_sub"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="该做下一组了"
+        android:textColor="#FFEBEE"
+        android:textSize="20sp" />
+
+    <Button
+        android:id="@+id/btn_record"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:padding="18dp"
+        android:text="✅ 记录这组"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:background="#FFFFFF"
+        android:textColor="#D32F2F" />
+
+    <Button
+        android:id="@+id/btn_snooze"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:padding="16dp"
+        android:text="⏳ 再休息 1 分钟"
+        android:textSize="18sp"
+        android:background="#33FFFFFF"
+        android:textColor="#FFFFFF" />
+
+    <Button
+        android:id="@+id/btn_close"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:padding="14dp"
+        android:text="关闭"
+        android:textSize="16sp"
+        android:background="@android:color/transparent"
+        android:textColor="#FFCDD2" />
+
+</LinearLayout>
