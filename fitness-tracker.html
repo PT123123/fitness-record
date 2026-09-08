@@ -609,7 +609,7 @@ function permState(){
   }catch(e){}
   let notif=false;
   try{ if(window.Notification) notif = Notification.permission==='granted'; }catch(e){}
-  return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0 };
+  return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0, sound:0 };
 }
 function permBadge(ok){
   if(ok===true) return '<span class="p-state ok">已授权</span>';
@@ -645,6 +645,11 @@ function renderSettings(){
           <div class="p-desc">归零时震动提醒，无需申请</div></div>
         ${permBadge(true)}
       </div>
+      <div class="field-label" style="margin-top:14px">闹铃声音</div>
+      <div class="chips">
+        <span class="chip ${p.sound===1?'':'on'}" onclick="setSoundMode(0)">🔔 内置尖锐铃声</span>
+        <span class="chip ${p.sound===1?'on':''}" onclick="setSoundMode(1)">🎵 跟随系统闹铃</span>
+      </div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
         <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
@@ -677,6 +682,10 @@ function askFullScreen(){
 }
 function testReminder(){
   Native.fire({ restSeconds:3, label:'测试提醒', test:true, at:nowTime() });
+}
+function setSoundMode(m){
+  try{ if(window.FitnessNative && window.FitnessNative.setAlarmSound) window.FitnessNative.setAlarmSound(m); }catch(e){}
+  renderSettings();
 }
 window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };
 

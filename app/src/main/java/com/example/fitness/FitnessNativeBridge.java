@@ -60,9 +60,15 @@ public class FitnessNativeBridge {
         CountdownScheduler.cancel(app);
     }
 
+    /** 设置闹铃音模式：0=内置尖锐铃声，1=跟随系统闹铃音 */
+    @JavascriptInterface
+    public void setAlarmSound(int mode) {
+        Reminder.setSoundMode(app, mode);
+    }
+
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
 
-    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate} */
+    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound} */
     @JavascriptInterface
     public String getPermissionState() {
         try {
@@ -72,6 +78,7 @@ public class FitnessNativeBridge {
             o.put("notifications", hasNotificationPermission());
             o.put("overlay", Settings.canDrawOverlays(app));
             o.put("vibrate", true);
+            o.put("sound", Reminder.soundMode(app));
             return o.toString();
         } catch (Throwable t) { return "{}"; }
     }
