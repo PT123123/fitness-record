@@ -58,13 +58,39 @@ public class MainActivity extends Activity {
     }
 
     /** Android 13+ 需动态申请通知权限，否则强提醒通知不弹出 */
-    private void ensureNotificationPermission() {
+    private void ensureNotificationPermission() { requestNotificationPermission(); }
+
+    /** 供 JS 桥接调用：申请通知权限（Android 13+） */
+    public void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
             }
+        }
+    }
+
+    /** 打开本应用的系统设置页（通知权限 / Android 14+「全屏通知」开关都在这里） */
+    public void openAppSettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            i.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            startActivity(i);
+        } catch (Throwable t) {
+            try { startActivity(new Intent(Settings.ACTION_SETTINGS)); } catch (Throwable ignored) {}
+        }
+    }
+
+    /** 从系统设置返回时通知 JS 刷新权限状态（设置页的「重新检查」也会用到） */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            web.evaluateJavascript("window.__onNativeResume && window.__onNativeResume()", null);
+        } else {
+            web.loadUrl("javascript:window.__onNativeResume && window.__onNativeResume()");
         }
     }
 

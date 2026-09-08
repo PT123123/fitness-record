@@ -1,11 +1,13 @@
 package com.example.fitness;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.os.Build;
 import android.os.Handler;
@@ -16,6 +18,7 @@ import android.os.VibratorManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
+import androidx.core.content.ContextCompat;
 import org.json.JSONObject;
 
 /**
@@ -44,8 +47,9 @@ public class FitnessNativeBridge {
     @JavascriptInterface
     public void fire(String json) {
         final int restSeconds = parseRest(json);
+        final boolean isTest = parseTest(json);
         runOnUi(() -> {
-            showLockScreenAlarm(restSeconds);   // ① 锁屏全屏弹窗（最核心）
+            showLockScreenAlarm(restSeconds, isTest); // ① 锁屏全屏弹窗（最核心）
             showHeadsUpNotification(restSeconds); // ② 高优先级通知（下拉/状态栏）
             tryStartOverlay();                    // ③ 悬浮窗（需授权，可选）
             startVibrate();                       // ④ 持续震动
@@ -64,10 +68,47 @@ public class FitnessNativeBridge {
         });
     }
 
+    /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
+
+    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate} */
+    @JavascriptInterface
+    public String getPermissionState() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("native", true);
+            o.put("sdk", Build.VERSION.SDK_INT);
+            o.put("notifications", hasNotificationPermission());
+            o.put("overlay", Settings.canDrawOverlays(app));
+            o.put("vibrate", true);
+            return o.toString();
+        } catch (Throwable t) { return "{}"; }
+    }
+
+    /** 申请通知权限（Android 13+ 运行时权限） */
+    @JavascriptInterface
+    public void requestNotificationPermission() { activity.requestNotificationPermission(); }
+
+    /** 跳转悬浮窗授权页（SYSTEM_ALERT_WINDOW 需用户手动开） */
+    @JavascriptInterface
+    public void openOverlaySettings() { activity.openOverlaySettings(); }
+
+    /** 打开本应用系统设置页（通知/全屏通知开关） */
+    @JavascriptInterface
+    public void openAppSettings() { activity.openAppSettings(); }
+
+    private boolean hasNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return true; // Android 12-：安装即授予
+    }
+
     /* ==================== ① 锁屏全屏弹窗 ==================== */
-    private void showLockScreenAlarm(int restSeconds) {
+    private void showLockScreenAlarm(int restSeconds, boolean isTest) {
         Intent i = new Intent(app, AlarmActivity.class);
         i.putExtra(AlarmActivity.EXTRA_REST, restSeconds);
+        i.putExtra(AlarmActivity.EXTRA_TEST, isTest);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP
                 | Intent.FLAG_ACTIVITY_NO_ANIMATION);
@@ -182,6 +223,11 @@ public class FitnessNativeBridge {
         int rest = 0;
         try { if (json != null && !json.isEmpty()) rest = new JSONObject(json).optInt("restSeconds", 0); } catch (Throwable ignored) {}
         return rest;
+    }
+
+    private boolean parseTest(String json) {
+        try { if (json != null && !json.isEmpty()) return new JSONObject(json).optBoolean("test", false); } catch (Throwable ignored) {}
+        return false;
     }
 
     private Vibrator getVibrator() {

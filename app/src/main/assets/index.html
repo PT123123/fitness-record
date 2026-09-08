@@ -50,32 +50,18 @@
   .sb-stats b{ color:var(--acc); }
   .sb-foot{ padding:12px 4px 4px; color:#666; font-size:12px; text-align:center; }
 
-  /* 闹铃 */
-  .sel{ background:var(--card2); color:var(--txt); border:1px solid var(--line);
-    border-radius:8px; padding:8px 10px; font-size:15px; }
-  .alarm-item{ background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
-    display:flex; align-items:center; gap:12px; }
-  .alarm-item.off{ opacity:.45; }
-  .alarm-time{ font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
-  .alarm-badge{ font-size:11px; color:var(--acc); background:rgba(79,195,247,.12); padding:2px 8px;
-    border-radius:10px; margin-left:8px; vertical-align:2px; font-weight:500; }
-  .alarm-label{ color:var(--sub); font-size:13px; margin-top:2px; }
-  .switch{ position:relative; width:46px; height:26px; display:inline-block; flex:none; }
-  .switch input{ opacity:0; width:0; height:0; }
-  .slider{ position:absolute; inset:0; background:var(--chip); border-radius:26px; transition:.2s; cursor:pointer; }
-  .slider:before{ content:''; position:absolute; width:20px; height:20px; left:3px; top:3px;
-    background:#888; border-radius:50%; transition:.2s; }
-  .switch input:checked + .slider{ background:var(--acc); }
-  .switch input:checked + .slider:before{ transform:translateX(20px); background:#001; }
-
-  /* 响铃弹窗 */
-  #ring-modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
-    background:rgba(0,0,0,.65); z-index:80; }
-  .ring-card{ background:var(--card); border-radius:18px; padding:26px; width:min(320px,82vw);
-    text-align:center; border:1px solid var(--acc); box-shadow:0 12px 44px rgba(0,0,0,.5); }
-  .ring-icon{ font-size:52px; animation:pulse 1s infinite; }
-  .ring-time{ font-size:46px; font-weight:800; font-variant-numeric:tabular-nums; margin:8px 0 2px; color:var(--acc); }
-  .ring-label{ color:var(--sub); margin-bottom:18px; font-size:15px; }
+  /* 设置：系统权限检查 */
+  .perm-item{ background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+    display:flex; align-items:center; gap:10px; }
+  .perm-item .p-info{ flex:1; min-width:0; }
+  .perm-item .p-name{ font-size:15px; font-weight:600; }
+  .perm-item .p-desc{ color:var(--sub); font-size:12px; margin-top:2px; }
+  .p-state{ font-size:13px; font-weight:600; padding:4px 10px; border-radius:10px; flex:none; white-space:nowrap; }
+  .p-state.ok{ color:var(--acc2); background:rgba(46,158,91,.15); }
+  .p-state.no{ color:var(--warn); background:rgba(239,83,80,.15); }
+  .p-act{ background:var(--acc); color:#001; border:none; border-radius:10px; padding:9px 13px;
+    font-size:13px; font-weight:600; flex:none; cursor:pointer; }
+  .p-act.ghost{ background:var(--card2); color:var(--txt); }
 
   h2{ font-size:16px; margin:4px 2px 12px; }
   .card{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; }
@@ -159,7 +145,7 @@
 <div class="topbar">
   <button class="tb-btn" onclick="openSidebar()" aria-label="菜单">☰</button>
   <div class="tb-title">🏋️ 健身训练记录</div>
-  <button class="tb-btn" onclick="switchTab('alarm')" aria-label="闹铃">⏰</button>
+  <button class="tb-btn" onclick="switchTab('settings')" aria-label="设置">⚙</button>
 </div>
 <div class="backdrop" id="backdrop" onclick="closeSidebar()"></div>
 <aside class="sidebar" id="sidebar">
@@ -169,7 +155,7 @@
   </div>
   <nav class="sb-nav">
     <button data-tab="timer" onclick="goTab('timer')">⏱ 计时器</button>
-    <button data-tab="alarm" onclick="goTab('alarm')">⏰ 闹铃</button>
+    <button data-tab="settings" onclick="goTab('settings')">⚙ 设置</button>
     <button data-tab="export" onclick="goTab('export')">📤 导出</button>
   </nav>
   <div class="sb-stats" id="sb-stats"></div>
@@ -178,10 +164,9 @@
 <div class="wrap" id="app"></div>
 <div class="tabs">
   <button data-tab="timer" class="on">⏱ 计时器</button>
-  <button data-tab="alarm">⏰ 闹铃</button>
+  <button data-tab="settings">⚙ 设置</button>
   <button data-tab="export">📤 导出</button>
 </div>
-<div id="ring-modal"></div>
 
 <script>
 /* ============ 预设 ============ */
@@ -229,8 +214,6 @@ let state = {
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t}
   editingIdx:null,
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
-  alarms:[],          // {id,time,label,repeat:'once'|'daily',enabled,lastFired}
-  ringing:null,       // {id,label,time,until}
 };
 let showManual = false;
 let recDraft = { part:'', action:'', rest:60, reps:'', weight:'', note:'', t:'' };
@@ -239,14 +222,13 @@ let groupDefaults = { part:'', action:'', reps:'', weight:'' };
 
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.records) state.records=d.records; if(d.groups) state.groups=d.groups;
-  if(d.alarms) state.alarms=d.alarms;
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, alarms:state.alarms})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft})); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -608,127 +590,86 @@ function renderExport(){
 function copyExport(){ const t=$('export-text').textContent;
   navigator.clipboard.writeText(t).then(()=>alert('已复制 ✔')).catch(()=>alert('复制失败，请手动选取')); }
 
-/* ============ 闹铃（到点响系统提醒音） ============ */
-function fmtClock(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
-function addAlarm(time,label,repeat){
-  if(!time){ alert('请选择闹铃时间'); return; }
-  if(state.alarms.some(a=>a.enabled && a.time===time)){ alert('已有一个相同时间的启用闹铃'); return; }
-  state.alarms.push({ id:uid(), time, label:label||time, repeat:repeat||'once', enabled:true, lastFired:'' });
-  persist(); renderAlarm(); refreshSidebar();
-  try{ if(window.Notification && Notification.permission==='default') Notification.requestPermission(); }catch(e){}
+/* ============ 设置：系统权限检查（为计时器的倒计时提醒服务） ============ */
+function permState(){
+  try{
+    if(window.FitnessNative && window.FitnessNative.getPermissionState){
+      const s=window.FitnessNative.getPermissionState();
+      if(s){ const o=JSON.parse(s); if(o && typeof o.notifications==='boolean') return o; }
+    }
+  }catch(e){}
+  let notif=false;
+  try{ if(window.Notification) notif = Notification.permission==='granted'; }catch(e){}
+  return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0 };
 }
-function addAlarmFromInputs(){
-  const t=$('alarm-time').value, l=($('alarm-label').value||'').trim(), r=$('alarm-repeat').value;
-  addAlarm(t,l,r);
-  const le=$('alarm-label'); if(le) le.value='';
+function permBadge(ok){
+  if(ok===true) return '<span class="p-state ok">已授权</span>';
+  if(ok===false) return '<span class="p-state no">未授权</span>';
+  return '<span class="p-state no">—</span>';
 }
-function toggleAlarm(id){ const a=state.alarms.find(x=>x.id===id); if(!a) return;
-  a.enabled=!a.enabled; if(a.enabled) a.lastFired=''; persist(); renderAlarm(); refreshSidebar(); }
-function delAlarm(id){ state.alarms=state.alarms.filter(x=>x.id!==id); persist(); renderAlarm(); refreshSidebar(); }
-function nextAlarm(){
-  const now=new Date(); let best=null;
-  state.alarms.forEach(a=>{
-    if(!a.enabled) return;
-    const p=a.time.split(':').map(Number);
-    const d=new Date(now); d.setHours(p[0],p[1],0,0);
-    if(d<=now){ if(a.repeat!=='daily') return; d.setDate(d.getDate()+1); }
-    if(!best || d<best) best=d;
-  });
-  return best;
-}
-function renderAlarm(){
-  let html=`<h2>⏰ 闹铃</h2>
+function renderSettings(){
+  const p=permState();
+  const isNative=!!(window.FitnessNative && window.FitnessNative.fire);
+  let html=`<h2>⚙ 设置</h2>
     <div class="card">
-      <div class="field-label">新增闹铃（到点响铃 + 系统提醒音）</div>
-      <div class="row2">
-        <input class="inline-input" type="time" id="alarm-time" value="07:00">
-        <input class="inline-input" id="alarm-label" placeholder="备注，如：起床">
+      <div class="field-label">系统权限检查（倒计时结束的提醒依赖以下权限）</div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">通知提醒</div>
+          <div class="p-desc">到点弹状态栏提醒并响系统闹铃音；Android 13+ 需手动授权</div></div>
+        ${permBadge(p.notifications)}
+        ${p.notifications?'':'<button class="p-act" onclick="askNotif()">去授权</button>'}
       </div>
-      <div class="row2" style="margin-top:10px">
-        <select class="sel" id="alarm-repeat" style="flex:1">
-          <option value="once">仅响一次</option>
-          <option value="daily">每天重复</option>
-        </select>
-        <button class="btn btn-primary" onclick="addAlarmFromInputs()" style="padding:10px">＋ 添加</button>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">锁屏 / 全屏弹窗</div>
+          <div class="p-desc">Android 14+ 在系统通知设置里有独立的「全屏通知」开关</div></div>
+        ${permBadge(p.notifications)}
+        <button class="p-act ghost" onclick="askFullScreen()">去系统设置</button>
       </div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">悬浮窗</div>
+          <div class="p-desc">「在其他应用上层显示」，可选增强</div></div>
+        ${permBadge(p.overlay)}
+        ${p.overlay?'':'<button class="p-act" onclick="askOverlay()">去开启</button>'}
+      </div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">震动</div>
+          <div class="p-desc">归零时震动提醒，无需申请</div></div>
+        ${permBadge(true)}
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
+        <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
+      </div>
+    </div>
+    <div class="card" style="background:var(--card2)">
+      <div class="field-label">为什么休息结束没有系统提醒？</div>
+      <p style="color:var(--sub);font-size:13px;line-height:1.7">
+        ${isNative? '当前为安卓 App，提醒走系统通知；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
+        Android 13+ 未授予「通知权限」时系统不弹提醒也不响铃，点上方「去授权」即可；
+        休息时若把 App 退到后台，网页计时可能被系统节流、提醒会延迟，建议保持前台；
+        点「测试系统提醒」可立即验证整条链路。
+      </p>
     </div>`;
-  html+=`<div class="section-title">闹铃列表</div>`;
-  if(state.alarms.length===0){
-    html+=`<div class="empty">还没有闹铃，设置一个吧 ⏰</div>`;
-  } else {
-    [...state.alarms].reverse().forEach(a=>{
-      html+=`<div class="alarm-item ${a.enabled?'':'off'}">
-        <div style="flex:1">
-          <div class="alarm-time">${a.time}<span class="alarm-badge">${a.repeat==='daily'?'每天':'仅一次'}</span></div>
-          <div class="alarm-label">${a.label||a.time}</div>
-        </div>
-        <label class="switch"><input type="checkbox" ${a.enabled?'checked':''} onchange="toggleAlarm('${a.id}')"><span class="slider"></span></label>
-        <button class="del" onclick="delAlarm('${a.id}')">×</button>
-      </div>`;
-    });
-  }
-  const na=nextAlarm();
-  html+=`<div class="empty" style="padding:12px">${na? '⏰ 下次响铃：'+fmtClock(na)+' · '+(na.getDate()===new Date().getDate()?'今天':'明天') : '🔕 暂无启用的闹铃'}</div>`;
   $('app').innerHTML=html;
 }
-/* 提醒音：双音「叮咚」铃声，循环播放直到关闭；兼容安卓原生桥接 */
-let _actx=null;
-function actx(){ if(!_actx){ const C=window.AudioContext||window.webkitAudioContext; if(C) _actx=new C(); } return _actx; }
-function chime(){
-  const c=actx(); if(!c) return;
+function askNotif(){
   try{
-    if(c.state==='suspended') c.resume();
-    const t0=c.currentTime;
-    [[880,0],[1174.66,0.18]].forEach(([f,dt])=>{
-      const o=c.createOscillator(), g=c.createGain();
-      o.connect(g); g.connect(c.destination);
-      o.type='sine'; o.frequency.value=f;
-      g.gain.setValueAtTime(0.0001, t0+dt);
-      g.gain.exponentialRampToValueAtTime(0.35, t0+dt+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+dt+0.4);
-      o.start(t0+dt); o.stop(t0+dt+0.45);
-    });
+    if(window.FitnessNative && window.FitnessNative.requestNotificationPermission){ window.FitnessNative.requestNotificationPermission(); return; }
   }catch(e){}
+  try{ if(window.Notification) Notification.requestPermission().then(()=>renderSettings()); }catch(e){}
 }
-let _ringTimer=null;
-function startRing(){ stopRing(); chime(); _ringTimer=setInterval(chime,1500);
-  try{ if(navigator.vibrate) navigator.vibrate([500,250,500,250,500,250,600]); }catch(e){} }
-function stopRing(){ if(_ringTimer){ clearInterval(_ringTimer); _ringTimer=null; }
-  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
-function fireAlarm(a){
-  startRing();
-  state.ringing={ id:a.id, label:a.label||a.time, time:a.time, until:Date.now()+30000 };
-  try{ if(window.FitnessNative && window.FitnessNative.fire) window.FitnessNative.fire(JSON.stringify({type:'alarm', label:state.ringing.label, time:a.time})); }catch(e){}
-  try{ if(window.Notification && Notification.permission==='granted')
-    new Notification('⏰ '+state.ringing.label, { body:a.time+' · 闹铃提醒', tag:'fitness-alarm-'+a.id }); }catch(e){}
-  renderRingModal();
-  if(state.tab==='alarm') renderAlarm();
-  setTimeout(()=>{ if(state.ringing && state.ringing.id===a.id) dismissRing(); }, 30000);
+function askOverlay(){
+  try{ if(window.FitnessNative && window.FitnessNative.openOverlaySettings){ window.FitnessNative.openOverlaySettings(); return; } }catch(e){}
+  alert('浏览器预览没有悬浮窗权限，需安装安卓 App 后在系统设置中开启');
 }
-function renderRingModal(){
-  const box=$('ring-modal'); if(!box) return;
-  if(!state.ringing){ box.style.display='none'; box.innerHTML=''; return; }
-  box.style.display='flex';
-  box.innerHTML=`<div class="ring-card">
-    <div class="ring-icon">⏰</div>
-    <div class="ring-time">${state.ringing.time}</div>
-    <div class="ring-label">${state.ringing.label}</div>
-    <button class="btn btn-primary" style="width:100%" onclick="dismissRing()">🔕 关闭闹铃</button>
-  </div>`;
+function askFullScreen(){
+  try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
+  alert('浏览器预览没有该系统设置，需安装安卓 App');
 }
-function dismissRing(){
-  state.ringing=null; stopRing(); Native.dismiss(); renderRingModal();
+function testReminder(){
+  Native.fire({ restSeconds:3, label:'测试提醒', test:true, at:nowTime() });
 }
-function checkAlarms(){
-  const d=new Date();
-  const hm=fmtClock(d), key=today();
-  state.alarms.forEach(a=>{
-    if(!a.enabled || a.time!==hm || a.lastFired===key) return;
-    a.lastFired=key;
-    if(a.repeat!=='daily') a.enabled=false;
-    persist(); fireAlarm(a);
-  });
-}
+window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };
 
 /* ============ 侧边栏 ============ */
 function openSidebar(){ $('sidebar').classList.add('open'); $('backdrop').classList.add('show'); refreshSidebar(); }
@@ -736,10 +677,7 @@ function closeSidebar(){ $('sidebar').classList.remove('open'); $('backdrop').cl
 function goTab(tab){ closeSidebar(); switchTab(tab); }
 function refreshSidebar(){
   const el=$('sb-stats'); if(!el) return;
-  const on=state.alarms.filter(a=>a.enabled).length;
-  const na=nextAlarm();
-  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条<br>
-    启用闹铃 <b>${on}</b> 个${na? ' · 最近 ' + fmtClock(na) : ''}`;
+  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条`;
 }
 
 /* ============ 原生桥接（安卓 App 强提醒）============
@@ -773,7 +711,7 @@ function switchTab(tab){
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   document.querySelectorAll('.sb-nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   if(tab==='timer') renderTimer();
-  else if(tab==='alarm') renderAlarm();
+  else if(tab==='settings') renderSettings();
   else if(tab==='export') renderExport();
   refreshSidebar();
 }
@@ -782,9 +720,7 @@ document.addEventListener('click', e=>{ const b=e.target.closest('.tabs button')
 /* ============ 初始化 ============ */
 function init(){
   load(); renderTimer(); tick();
-  setInterval(checkAlarms,1000);
-  renderRingModal(); refreshSidebar();
-  document.addEventListener('pointerdown', ()=>{ try{ const c=actx(); if(c && c.state==='suspended') c.resume(); }catch(e){} }, {passive:true});
+  refreshSidebar();
   window.addEventListener('beforeunload', persist);
 }
 init();
