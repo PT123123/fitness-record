@@ -32,7 +32,19 @@ public final class Reminder {
     private static Vibrator vibrator;
     private static PowerManager.WakeLock wakeLock;
 
+    private static final String PREFS = "fitness_prefs";
+    private static final String KEY_SOUND = "alarm_sound_mode";
+
     private Reminder() {}
+
+    /** 铃声模式：0=内置尖锐铃声（默认），1=跟随系统闹铃音 */
+    public static int soundMode(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SOUND, 0);
+    }
+
+    public static void setSoundMode(Context ctx, int mode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SOUND, mode).apply();
+    }
 
     public static void fire(Context ctx, int restSeconds, boolean isTest) {
         ensureChannel(ctx);
@@ -88,22 +100,33 @@ public final class Reminder {
         try { ctx.startActivity(alarm); } catch (Throwable ignored) {}
     }
 
-    /* ==================== 系统闹铃音：MediaPlayer 直接播放，不依赖通知权限 ==================== */
+    /* ==================== 闹铃音：内置尖锐铃声 或 跟随系统闹铃音，不依赖通知权限 ==================== */
     private static void startAlarmSound(Context ctx) {
         try {
             stopAlarmSound();
-            Uri uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
-            if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            if (uri == null) { Log.w(TAG, "no alarm uri"); return; }
             MediaPlayer p = new MediaPlayer();
             p.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build());
-            p.setDataSource(ctx, uri);
+            if (soundMode(ctx) == 1) {
+                // 跟随系统闹铃音
+                Uri uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
+                if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+                if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                if (uri == null) { Log.w(TAG, "no alarm uri"); return; }
+                p.setDataSource(ctx, uri);
+                p.prepare();
+            } else {
+                // 内置尖锐铃声（res/raw/alarm_tone.wav，高频方波，与普通铃声明显区分）
+                android.content.res.AssetFileDescriptor afd =
+                        ctx.getResources().openRawResourceFd(R.raw.alarm_tone);
+                if (afd == null) { Log.w(TAG, "no raw tone"); return; }
+                p.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                afd.close();
+                p.prepare();
+            }
             p.setLooping(true);
-            p.prepare();
             p.start();
             alarmPlayer = p;
         } catch (Throwable t) { Log.w(TAG, "alarm sound fail", t); }
