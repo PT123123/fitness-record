@@ -157,6 +157,7 @@
     <button data-tab="timer" onclick="goTab('timer')">⏱ 计时器</button>
     <button data-tab="settings" onclick="goTab('settings')">⚙ 设置</button>
     <button data-tab="export" onclick="goTab('export')">📤 导出</button>
+    <button data-tab="notes" onclick="goTab('notes')">📝 笔记</button>
   </nav>
   <div class="sb-stats" id="sb-stats"></div>
   <div class="sb-foot">数据保存在本机 · 无需联网</div>
@@ -712,13 +713,83 @@ function setSoundMode(m){
 }
 window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };
 
+
+/* ============ 笔记（纯本地存储，localStorage）============ */
+const NOTES_LS = 'fitness_notes_v1';
+let notes = [];
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function loadNotes(){ try{ const d=JSON.parse(localStorage.getItem(NOTES_LS)||'[]'); if(Array.isArray(d)) notes=d; }catch(e){} }
+function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); }
+function noteTitle(n){ const line=(n.content||'').split('\n').find(x=>x.trim()); return line? line.trim() : '无标题'; }
+function notePreview(n){ const lines=(n.content||'').split('\n').map(x=>x.trim()).filter(Boolean); return lines.slice(1).join(' '); }
+function fmtNoteTime(ts){ if(!ts) return ''; const d=new Date(ts); const diff=Date.now()-ts;
+  if(diff<60e3) return '刚刚'; if(diff<3600e3) return Math.floor(diff/60e3)+' 分钟前';
+  if(diff<86400e3) return Math.floor(diff/3600e3)+' 小时前';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+let noteEditingId = null;
+
+function renderNotes(){
+  state.tab='notes';
+  if(noteEditingId){ renderNoteEditor(noteEditingId); return; }
+  const sorted=[...notes].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||(b.updatedAt||0)-(a.updatedAt||0));
+  let html=`<h2>📝 笔记</h2>`;
+  if(sorted.length===0){
+    html+=`<div class="empty" style="padding:40px 18px">还没有笔记<br><span style="font-size:13px;color:var(--sub)">记点训练心得、饮食计划、动作要点…</span></div>`;
+  } else {
+    sorted.forEach(n=>{
+      const t=noteTitle(n), pv=notePreview(n);
+      html+=`<div class="group-item" style="margin-bottom:10px">
+        <div class="group-head" onclick="openNoteEditor('${n.id}')">
+          <span class="gidx" style="min-width:0;flex:1;color:var(--txt)">${escHtml(t)}</span>
+          <span class="gtime">${n.pinned?'📌 ':''}${fmtNoteTime(n.updatedAt)}</span>
+        </div>
+        ${pv?`<div style="padding:2px 14px 12px;color:var(--sub);font-size:13px;line-height:1.6">${escHtml(pv)}</div>`:''}
+      </div>`;
+    });
+  }
+  html+=`<button class="set-btn" onclick="newNote()">＋ 新建笔记</button>`;
+  $('app').innerHTML=html;
+  refreshSidebar();
+}
+function newNote(){
+  const id=uid();
+  notes.unshift({ id, content:'', pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
+  persistNotes(); noteEditingId=id; renderNotes();
+}
+function openNoteEditor(id){ noteEditingId=id; renderNotes(); }
+function backFromNote(){ noteEditingId=null; renderNotes(); }
+function updateNoteContent(id, v){ const n=notes.find(x=>x.id===id); if(!n) return; n.content=v; n.updatedAt=Date.now(); persistNotes(); }
+function toggleNotePin(id){ const n=notes.find(x=>x.id===id); if(!n) return; n.pinned=!n.pinned; n.updatedAt=Date.now(); persistNotes(); renderNotes(); }
+function deleteNote(id){
+  if(!confirm('删除这条笔记？')) return;
+  notes=notes.filter(x=>x.id!==id); persistNotes(); noteEditingId=null; renderNotes();
+}
+function renderNoteEditor(id){
+  const n=notes.find(x=>x.id===id); if(!n){ noteEditingId=null; renderNotes(); return; }
+  const t=noteTitle(n);
+  let html=`<div class="rec-head" style="margin-bottom:8px">
+    <span class="rh-title">📝 笔记 <span style="color:var(--sub);font-weight:400;font-size:12px">${escHtml(t)}</span></span>
+    <button class="rh-close" onclick="backFromNote()">返回 ✕</button>
+  </div>
+  <div class="card" style="padding:10px">
+    <textarea id="note-editor" class="inline-input" style="min-height:52vh;resize:none;line-height:1.7;font-size:15px" placeholder="写点什么…" oninput="updateNoteContent('${n.id}', this.value)">${escHtml(n.content)}</textarea>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn btn-ghost" onclick="toggleNotePin('${n.id}')">${n.pinned?'📌 取消置顶':'📌 置顶'}</button>
+      <button class="btn btn-stop" onclick="deleteNote('${n.id}')">🗑 删除</button>
+    </div>
+  </div>`;
+  $('app').innerHTML=html;
+  const ta=$('note-editor');
+  if(ta){ ta.focus(); const len=ta.value.length; try{ ta.setSelectionRange(len,len); }catch(e){} }
+}
+
 /* ============ 侧边栏 ============ */
 function openSidebar(){ $('sidebar').classList.add('open'); $('backdrop').classList.add('show'); refreshSidebar(); }
 function closeSidebar(){ $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show'); }
 function goTab(tab){ closeSidebar(); switchTab(tab); }
 function refreshSidebar(){
   const el=$('sb-stats'); if(!el) return;
-  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条`;
+  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条 · 笔记 <b>${notes.length}</b> 篇`;
 }
 
 /* ============ 原生桥接（安卓 App 强提醒）============
@@ -770,13 +841,14 @@ function switchTab(tab){
   if(tab==='timer') renderTimer();
   else if(tab==='settings') renderSettings();
   else if(tab==='export') renderExport();
+  else if(tab==='notes') renderNotes();
   refreshSidebar();
 }
 document.addEventListener('click', e=>{ const b=e.target.closest('.tabs button'); if(b) switchTab(b.dataset.tab); });
 
 /* ============ 初始化 ============ */
 function init(){
-  load(); renderTimer(); tick();
+  load(); loadNotes(); renderTimer(); tick();
   refreshSidebar();
   window.addEventListener('beforeunload', persist);
 }
