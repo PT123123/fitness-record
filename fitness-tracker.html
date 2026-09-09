@@ -225,10 +225,12 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
+  // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
+  if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal})); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -296,6 +298,7 @@ function setMode(m){
 window.restartCountdown = function(seconds){
   seconds = parseInt(seconds)||60;
   state.cdTotal = seconds;
+  persist();
   setMode('countdown');
   startTimer();
 };
@@ -351,8 +354,8 @@ function closeEdit(){ state.editingIdx=null; renderTimer(); }
 function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
 function pickAction(i,a){ updateGroup(i,{action:a}); }
 function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
-function setCdMin(v){ state.cdTotal = parseInt(v)*60 + (state.cdTotal%60); state.cdLeft=state.cdTotal; renderTimer(); }
-function setCdSec(v){ state.cdTotal = Math.floor(state.cdTotal/60)*60 + parseInt(v); state.cdLeft=state.cdTotal; renderTimer(); }
+function setCdMin(v){ state.cdTotal = parseInt(v)*60 + (state.cdTotal%60); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
+function setCdSec(v){ state.cdTotal = Math.floor(state.cdTotal/60)*60 + parseInt(v); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
 
 function saveGroupsToHistory(){
   const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
@@ -609,7 +612,8 @@ function permState(){
   }catch(e){}
   let notif=false;
   try{ if(window.Notification) notif = Notification.permission==='granted'; }catch(e){}
-  return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0, sound:0 };
+  return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0, sound:0,
+           exactAlarm:null, battery:null, fullScreen:null };
 }
 function permBadge(ok){
   if(ok===true) return '<span class="p-state ok">已授权</span>';
@@ -624,15 +628,27 @@ function renderSettings(){
       <div class="field-label">系统权限检查（倒计时结束的提醒依赖以下权限）</div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">通知提醒</div>
-          <div class="p-desc">到点弹状态栏提醒并响系统闹铃音；Android 13+ 需手动授权</div></div>
+          <div class="p-desc">到点弹状态栏提醒并响铃；Android 13+ 需手动授权</div></div>
         ${permBadge(p.notifications)}
         ${p.notifications?'':'<button class="p-act" onclick="askNotif()">去授权</button>'}
       </div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">锁屏 / 全屏弹窗</div>
-          <div class="p-desc">Android 14+ 在系统通知设置里有独立的「全屏通知」开关</div></div>
-        ${permBadge(p.notifications)}
-        <button class="p-act ghost" onclick="askFullScreen()">去系统设置</button>
+          <div class="p-desc">锁屏上直接弹出提醒界面；Android 14+ 需在系统通知设置里打开「全屏通知」</div></div>
+        ${permBadge(p.fullScreen)}
+        ${p.fullScreen?'':'<button class="p-act" onclick="askFullScreen()">去系统设置</button>'}
+      </div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">精确闹钟（准点）</div>
+          <div class="p-desc">到点分秒不差；Android 12+ 需系统授权，未授权时前台服务仍可准时提醒</div></div>
+        ${permBadge(p.exactAlarm)}
+        ${p.exactAlarm?'':'<button class="p-act" onclick="askExactAlarm()">去授权</button>'}
+      </div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">电池优化 / 自启动</div>
+          <div class="p-desc">关闭电池限制防系统杀后台导致不提醒；小米/红米还须允许「自启动」</div></div>
+        ${permBadge(p.battery)}
+        ${p.battery?'':'<button class="p-act" onclick="askBattery()">去设置</button>'}
       </div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">悬浮窗</div>
@@ -647,7 +663,7 @@ function renderSettings(){
       </div>
       <div class="field-label" style="margin-top:14px">闹铃声音</div>
       <div class="chips">
-        <span class="chip ${p.sound===1?'':'on'}" onclick="setSoundMode(0)">🔔 内置尖锐铃声</span>
+        <span class="chip ${p.sound===1?'':'on'}" onclick="setSoundMode(0)">🔔 内置门铃声（叮咚）</span>
         <span class="chip ${p.sound===1?'on':''}" onclick="setSoundMode(1)">🎵 跟随系统闹铃</span>
       </div>
       <div class="btn-row" style="margin-top:14px">
@@ -658,9 +674,8 @@ function renderSettings(){
     <div class="card" style="background:var(--card2)">
       <div class="field-label">为什么休息结束没有系统提醒？</div>
       <p style="color:var(--sub);font-size:13px;line-height:1.7">
-        ${isNative? '当前为安卓 App，提醒直接播放系统闹铃音；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
-        倒计时已交给系统精确闹钟，锁屏/退后台也会准点提醒；
-        若仍听不到声音，请确认系统「闹钟/媒体音量」未静音、勿扰模式未拦截，并点上方「去授权」检查通知权限；
+        ${isNative? '当前为安卓 App：倒计时期间会启动「前台服务」保活，到点由前台服务 + 系统精确闹钟双通道触发，锁屏/退后台也会提醒；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
+        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
         点「测试系统提醒」可立即验证整条链路。
       </p>
     </div>`;
@@ -679,6 +694,14 @@ function askOverlay(){
 function askFullScreen(){
   try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
   alert('浏览器预览没有该系统设置，需安装安卓 App');
+}
+function askExactAlarm(){
+  try{ if(window.FitnessNative && window.FitnessNative.requestExactAlarm){ window.FitnessNative.requestExactAlarm(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askBattery(){
+  try{ if(window.FitnessNative && window.FitnessNative.requestBattery){ window.FitnessNative.requestBattery(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
 }
 function testReminder(){
   Native.fire({ restSeconds:3, label:'测试提醒', test:true, at:nowTime() });
@@ -717,6 +740,12 @@ const Native = {
   },
   cancelCountdown(){                // 暂停/重置/记录完成时取消系统闹钟
     try{ if(window.FitnessNative && window.FitnessNative.cancelCountdown) window.FitnessNative.cancelCountdown(); }catch(e){}
+  },
+  requestExactAlarm(){              // 跳转「精确闹钟」授权页
+    try{ if(window.FitnessNative && window.FitnessNative.requestExactAlarm) window.FitnessNative.requestExactAlarm(); }catch(e){}
+  },
+  requestBattery(){                 // 跳转「忽略电池优化」授权页
+    try{ if(window.FitnessNative && window.FitnessNative.requestBattery) window.FitnessNative.requestBattery(); }catch(e){}
   },
   fireFinish(restSeconds){          // 倒计时归零：先取消系统闹钟，再直接触发强提醒（前台即时路径）
     this.cancelCountdown();

@@ -1,11 +1,14 @@
 package com.example.fitness;
 
 import android.Manifest;
+import android.app.AlarmManager;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
@@ -48,27 +51,35 @@ public class FitnessNativeBridge {
         runOnUi(() -> Reminder.dismiss(app));
     }
 
-    /** 登记系统精确闹钟：restSeconds 秒后（endAtMillis 时刻）准时提醒，锁屏/后台可用 */
+    /** 登记倒计时：启动前台服务保活 + 系统精确闹钟兜底，锁屏/后台到点准时提醒 */
     @JavascriptInterface
     public void scheduleCountdown(int restSeconds, long endAtMillis) {
-        CountdownScheduler.schedule(app, restSeconds, endAtMillis);
+        CountdownService.start(app, restSeconds, endAtMillis);
     }
 
-    /** 取消已登记的倒计时闹钟（暂停/重置/记录完成时调用） */
+    /** 取消倒计时（暂停/重置/记录完成时调用）：停前台服务并撤销系统闹钟 */
     @JavascriptInterface
     public void cancelCountdown() {
-        CountdownScheduler.cancel(app);
+        CountdownService.stop(app);
     }
 
-    /** 设置闹铃音模式：0=内置尖锐铃声，1=跟随系统闹铃音 */
+    /** 设置闹铃音模式：0=内置门铃音（叮咚），1=跟随系统闹铃音 */
     @JavascriptInterface
     public void setAlarmSound(int mode) {
         Reminder.setSoundMode(app, mode);
     }
 
+    /** 跳转「精确闹钟」授权页（Android 12+ 生效） */
+    @JavascriptInterface
+    public void requestExactAlarm() { activity.requestExactAlarmPermission(); }
+
+    /** 跳转「忽略电池优化」授权页（防系统杀后台） */
+    @JavascriptInterface
+    public void requestBattery() { activity.requestIgnoreBatteryOptimizations(); }
+
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
 
-    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound} */
+    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound,exactAlarm,battery,fullScreen} */
     @JavascriptInterface
     public String getPermissionState() {
         try {
@@ -79,6 +90,9 @@ public class FitnessNativeBridge {
             o.put("overlay", Settings.canDrawOverlays(app));
             o.put("vibrate", true);
             o.put("sound", Reminder.soundMode(app));
+            o.put("exactAlarm", canExactAlarm());
+            o.put("battery", ignoringBatteryOptimizations());
+            o.put("fullScreen", canUseFullScreenIntent());
             return o.toString();
         } catch (Throwable t) { return "{}"; }
     }
@@ -101,6 +115,33 @@ public class FitnessNativeBridge {
                     == PackageManager.PERMISSION_GRANTED;
         }
         return true; // Android 12-：安装即授予
+    }
+
+    /** Android 12+ 精确闹钟是否可用（决定到点是否分秒不差；Android 14+ 非闹钟类 App 需在系统设置手动授权） */
+    private boolean canExactAlarm() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AlarmManager am = (AlarmManager) app.getSystemService(Context.ALARM_SERVICE);
+            return am != null && am.canScheduleExactAlarms();
+        }
+        return true;
+    }
+
+    /** Android 14+ 全屏通知（锁屏弹窗）是否可用 */
+    private boolean canUseFullScreenIntent() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+            return nm != null && nm.canUseFullScreenIntent();
+        }
+        return true;
+    }
+
+    /** 是否已关闭电池优化（防系统杀后台） */
+    private boolean ignoringBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(app.getPackageName());
+        }
+        return true;
     }
 
     /* ==================== 悬浮窗（可选增强） ==================== */
