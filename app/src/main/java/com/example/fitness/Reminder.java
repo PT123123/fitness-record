@@ -35,9 +35,13 @@ public final class Reminder {
     private static final String PREFS = "fitness_prefs";
     private static final String KEY_SOUND = "alarm_sound_mode";
 
+    /** 双通道（前台服务 + 系统闹钟兜底）可能同时到点，30 秒内只提醒一次 */
+    private static volatile long sLastFireAt = 0L;
+    private static final long DEDUP_MS = 30_000L;
+
     private Reminder() {}
 
-    /** 铃声模式：0=内置尖锐铃声（默认），1=跟随系统闹铃音 */
+    /** 铃声模式：0=内置门铃音（默认，叮咚双音），1=跟随系统闹铃音 */
     public static int soundMode(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SOUND, 0);
     }
@@ -46,7 +50,18 @@ public final class Reminder {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SOUND, mode).apply();
     }
 
+    /** 新一轮倒计时开始时调用，清除上一轮的去重标记 */
+    public static void resetDedup() {
+        sLastFireAt = 0L;
+    }
+
     public static void fire(Context ctx, int restSeconds, boolean isTest) {
+        long now = System.currentTimeMillis();
+        if (!isTest && now - sLastFireAt < DEDUP_MS) {
+            Log.i(TAG, "skip duplicate fire");
+            return;
+        }
+        sLastFireAt = now;
         ensureChannel(ctx);
         startAlarmSound(ctx);
         showLockScreen(ctx, restSeconds, isTest);
@@ -100,7 +115,7 @@ public final class Reminder {
         try { ctx.startActivity(alarm); } catch (Throwable ignored) {}
     }
 
-    /* ==================== 闹铃音：内置尖锐铃声 或 跟随系统闹铃音，不依赖通知权限 ==================== */
+    /* ==================== 闹铃音：内置门铃音（叮咚） 或 跟随系统闹铃音，不依赖通知权限 ==================== */
     private static void startAlarmSound(Context ctx) {
         try {
             stopAlarmSound();
@@ -118,7 +133,7 @@ public final class Reminder {
                 p.setDataSource(ctx, uri);
                 p.prepare();
             } else {
-                // 内置尖锐铃声（res/raw/alarm_tone.wav，高频方波，与普通铃声明显区分）
+                // 内置门铃音（res/raw/alarm_tone.wav，叮咚双音，柔和不刺耳）
                 android.content.res.AssetFileDescriptor afd =
                         ctx.getResources().openRawResourceFd(R.raw.alarm_tone);
                 if (afd == null) { Log.w(TAG, "no raw tone"); return; }
