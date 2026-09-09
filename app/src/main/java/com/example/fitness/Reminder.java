@@ -41,7 +41,7 @@ public final class Reminder {
 
     private Reminder() {}
 
-    /** 铃声模式：0=内置门铃音（默认，叮咚双音），1=跟随系统闹铃音 */
+    /** 铃声模式：0=内置门铃声（叮咚，默认），1=跟随系统闹铃音，2=滴滴滴滴滴滴，3=敲门声（咚咚咚），4=风铃声 */
     public static int soundMode(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SOUND, 0);
     }
@@ -115,7 +115,7 @@ public final class Reminder {
         try { ctx.startActivity(alarm); } catch (Throwable ignored) {}
     }
 
-    /* ==================== 闹铃音：内置门铃音（叮咚） 或 跟随系统闹铃音，不依赖通知权限 ==================== */
+    /* ==================== 闹铃音：内置铃声（门铃/滴滴/敲门/风铃）或跟随系统闹铃音，不依赖通知权限 ==================== */
     private static void startAlarmSound(Context ctx) {
         try {
             stopAlarmSound();
@@ -124,7 +124,8 @@ public final class Reminder {
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build());
-            if (soundMode(ctx) == 1) {
+            int mode = soundMode(ctx);
+            if (mode == 1) {
                 // 跟随系统闹铃音
                 Uri uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
                 if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
@@ -133,9 +134,16 @@ public final class Reminder {
                 p.setDataSource(ctx, uri);
                 p.prepare();
             } else {
-                // 内置门铃音（res/raw/alarm_tone.wav，叮咚双音，柔和不刺耳）
+                // 内置铃声：0=门铃（叮咚） 2=滴滴滴滴滴滴 3=敲门声（咚咚咚） 4=风铃声
+                int resId;
+                switch (mode) {
+                    case 2: resId = R.raw.beep_tone; break;
+                    case 3: resId = R.raw.knock_tone; break;
+                    case 4: resId = R.raw.chime_tone; break;
+                    default: resId = R.raw.alarm_tone;
+                }
                 android.content.res.AssetFileDescriptor afd =
-                        ctx.getResources().openRawResourceFd(R.raw.alarm_tone);
+                        ctx.getResources().openRawResourceFd(resId);
                 if (afd == null) { Log.w(TAG, "no raw tone"); return; }
                 p.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
                 afd.close();
