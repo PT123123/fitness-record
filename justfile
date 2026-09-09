@@ -17,3 +17,9 @@ build:
 # Install the debug APK to a connected device
 install:
     set -euo pipefail; SRC="{{source_dir()}}"; SRC="${SRC//\\//}"; APK="${SRC}/app/build/outputs/apk/debug/app-debug.apk"; if [ ! -f "${APK}" ]; then echo "❌ 未找到 APK，请先运行 just build"; exit 1; fi; echo "📲 安装 ${APK} ..."; adb install -r "${APK}"
+
+
+# Clean build outputs
+clean:
+    set -euo pipefail; SRC="{{source_dir()}}"; SRC="${SRC//\\//}"; cd "${SRC}"; if [ -x "./gradlew" ]; then GRADLE="./gradlew"; else GRADLE="$(command -v gradle || true)"; fi; if [ -z "${GRADLE}" ]; then echo "❌ 未找到 gradle。"; exit 1; fi; echo "🧹 清理构建产物 ..."; ${GRADLE} clean; echo "✅ 清理完成"
+
