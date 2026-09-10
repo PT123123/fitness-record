@@ -135,6 +135,12 @@
   pre{ background:#0a0a0a; border-radius:12px; padding:14px; font-size:13px; white-space:pre-wrap;
     word-break:break-all; max-height:60vh; overflow:auto; }
   .section-title{ font-size:14px; color:var(--sub); margin:14px 2px 8px; }
+  .exp-field-list{ margin-top:6px; }
+  .exp-field-row{ display:flex; align-items:center; gap:8px; background:var(--card2);
+    border-radius:10px; padding:8px 10px; margin-bottom:6px; }
+  .exp-field-row input[type=checkbox]{ width:18px; height:18px; accent-color:var(--acc); }
+  .exp-field-name{ flex:1; font-size:14px; color:var(--txt); }
+  .exp-field-mv{ display:flex; gap:4px; }
 
   /* 笔记：符号工具栏 + 输入框 + 详情操作 */
   body.notes-mode{ padding-bottom:0; }
@@ -225,7 +231,7 @@ let state = {
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t}
   editingIdx:null,
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
-  exportFormat:'text', // 导出格式: text | csv | md | json
+  exportCfg: { order:['date','time','set','part','action','reps','weight','rest','note'], off:[], delim:'comma', header:true }, // 导出记录格式：字段顺序 + 分隔符
 };
 let showManual = false;
 let recDraft = { part:'', action:'', rest:60, reps:'', weight:'', note:'', t:'' };
@@ -237,13 +243,13 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
-  if(d.exportFormat) state.exportFormat=d.exportFormat;
+  if(d.exportCfg) state.exportCfg=sanitizeExportCfg(d.exportCfg);
   // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, exportFormat:state.exportFormat})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, exportCfg:state.exportCfg})); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -592,96 +598,82 @@ function addManual(){
 }
 function delRecord(id){ state.records=state.records.filter(r=>r.id!==id); persist(); renderTrain(); }
 
-/* ============ 导出（每次点开自动预览；格式在「设置 → 导出格式」中切换）============ */
+/* ============ 导出（每次点开自动预览；格式在「设置 → 导出记录格式」中配置：字段顺序 + 分隔符）============ */
 function collectExportItems(){
   const items=[];
-  state.groups.forEach(g=>{
+  state.groups.forEach((g,i)=>{
     if(!(g.part||g.action||g.reps||g.note)) return;
-    items.push({ date:today(), t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight||'', note:g.note||'' });
+    items.push({ date:today(), set:i+1, t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight==null? '' : g.weight, note:g.note||'' });
   });
-  state.records.forEach(r=> items.push({ date:r.date, t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight||'', note:r.note||'' }));
+  state.records.forEach(r=> items.push({ date:r.date, set:'', t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight==null? '' : r.weight, note:r.note||'' }));
   return items;
 }
 function sortItems(items){
   return items.slice().sort((a,b)=> (a.date<b.date?-1:a.date>b.date?1:0) || (a.t||'').localeCompare(b.t||''));
 }
 function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function csvEsc(v){ v=String(v==null?'':v); return /[",\r\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"' : v; }
-function mdEsc(v){ return String(v==null?'':v).replace(/\|/g,'\\|').replace(/\r?\n/g,' '); }
-
-function buildExportText(){
-  let txt='🏋️ 健身训练记录\n'+'='.repeat(40)+'\n\n';
-  const items=collectExportItems();
-  const byDate={};
-  items.forEach(it=>{ (byDate[it.date]=byDate[it.date]||[]).push(it); });
-  const dates=Object.keys(byDate).sort();
-  if(dates.length===0){ txt+='（暂无记录）\n'; return txt; }
-  dates.forEach(date=>{
-    txt+=`📅 ${date}\n`;
-    byDate[date].forEach(r=>{
-      const timePrefix = r.t? r.t+' ' : '';
-      txt+=`  ${timePrefix}${fmtRecordLine(r)}\n`;
-    });
-  });
-  return txt;
-}
-function buildExportCsv(){
-  const head=['日期','时间','部位','动作','次数','重量(kg)','休息(秒)','备注'];
-  const items=sortItems(collectExportItems());
-  if(items.length===0) return head.join(',')+'\n（暂无记录）';
-  const lines=[head.join(',')];
-  items.forEach(r=> lines.push([r.date,r.t,r.part,r.action,r.reps,r.weight,r.rest,r.note].map(csvEsc).join(',')));
-  return lines.join('\n');
-}
-function buildExportMarkdown(){
-  const items=collectExportItems();
-  const byDate={};
-  items.forEach(it=>{ (byDate[it.date]=byDate[it.date]||[]).push(it); });
-  const dates=Object.keys(byDate).sort();
-  let md='# 🏋️ 健身训练记录\n\n';
-  if(dates.length===0) return md+'（暂无记录）\n';
-  dates.forEach(date=>{
-    md+=`## ${date}\n\n`;
-    md+='| 时间 | 部位 | 动作 | 次数 | 重量(kg) | 休息(秒) | 备注 |\n';
-    md+='| --- | --- | --- | --- | --- | --- | --- |\n';
-    byDate[date].forEach(r=>{
-      md+=`| ${mdEsc(r.t)} | ${mdEsc(r.part)} | ${mdEsc(r.action)} | ${mdEsc(r.reps)} | ${mdEsc(r.weight)} | ${mdEsc(r.rest)} | ${mdEsc(r.note)} |\n`;
-    });
-    md+='\n';
-  });
-  return md;
-}
-function buildExportJson(){
-  const items=sortItems(collectExportItems());
-  const obj={
-    app:'健身训练记录',
-    exportedAt:`${today()} ${nowTime()}`,
-    count:items.length,
-    records:items.map(r=>({ date:r.date, time:r.t, part:r.part, action:r.action, reps:r.reps, weight:r.weight, rest:r.rest, note:r.note }))
+/* —— 导出记录格式：字段顺序 + 分隔符（在「设置 → 导出记录格式」中配置）—— */
+const EXPORT_CFG_DEFAULT = { order:['date','time','set','part','action','reps','weight','rest','note'], off:[], delim:'comma', header:true };
+const FIELD_META = {
+  date:{label:'日期'}, time:{label:'时间戳'}, set:{label:'组数'},
+  part:{label:'部位'}, action:{label:'动作'}, reps:{label:'次数'},
+  weight:{label:'重量(kg)'}, rest:{label:'间隔时间(秒)'}, note:{label:'备注'}
+};
+const DELIM_OPTIONS = [
+  {k:'comma', label:'逗号 ,', v:','},
+  {k:'tab',   label:'⇥ Tab', v:'\t'},
+  {k:'space', label:'空格',  v:' '},
+  {k:'semi',  label:'分号 ;', v:';'},
+  {k:'pipe',  label:'竖线 |', v:'|'},
+  {k:'custom',label:'✏️ 自定义', v:''}
+];
+function sanitizeExportCfg(c){
+  c=c||{};
+  const known=Object.keys(FIELD_META);
+  let order=Array.isArray(c.order)? c.order.filter(k=>known.includes(k)) : [];
+  known.forEach(k=>{ if(!order.includes(k)) order.push(k); });   // 补全缺失字段
+  const off=Array.isArray(c.off)? c.off.filter(k=>known.includes(k)) : [];
+  return {
+    order, off,
+    delim: DELIM_OPTIONS.some(o=>o.k===c.delim)? c.delim : 'comma',
+    custom: typeof c.custom==='string'? c.custom : '',
+    header: c.header!==false
   };
-  return JSON.stringify(obj, null, 2);
+}
+function resolveDelim(cfg){
+  cfg=cfg||state.exportCfg;
+  const opt=DELIM_OPTIONS.find(o=>o.k===cfg.delim);
+  if(!opt) return ',';
+  if(cfg.delim==='custom') return cfg.custom||',';
+  return opt.v;
+}
+function cellEsc(v, delim){
+  v=String(v==null?'':v);
+  return (v.indexOf(delim)>=0 || v.indexOf('"')>=0 || /[\r\n]/.test(v)) ? '"'+v.replace(/"/g,'""')+'"' : v;
 }
 function buildExport(){
-  switch(state.exportFormat){
-    case 'csv': return buildExportCsv();
-    case 'md': return buildExportMarkdown();
-    case 'json': return buildExportJson();
-    default: return buildExportText();
-  }
+  const cfg=sanitizeExportCfg(state.exportCfg);
+  const delim=resolveDelim(cfg);
+  const fields=cfg.order.filter(k=>!cfg.off.includes(k));
+  if(fields.length===0) return '（未选择任何字段，请到「设置 → 导出记录格式」勾选）';
+  const items=sortItems(collectExportItems());
+  const lines=[];
+  if(cfg.header) lines.push(fields.map(k=>FIELD_META[k].label).join(delim));
+  items.forEach(r=> lines.push(fields.map(k=>cellEsc(r[k], delim)).join(delim)));
+  return lines.length? lines.join('\n') : '（暂无记录）';
 }
-const EXPORT_FMT_INFO = {
-  text:{ name:'纯文本', tip:'纯文本预览，可粘贴到备忘录 / 微信等任意地方。' },
-  csv:{ name:'CSV 表格', tip:'CSV 表格，可用 Excel / WPS 直接打开或导入。' },
-  md:{ name:'Markdown', tip:'Markdown 表格，适合贴到 Notion / 博客 / 语雀。' },
-  json:{ name:'JSON', tip:'JSON 数据，适合程序处理或存档。' },
-};
+function fmtExportCfg(){
+  const cfg=sanitizeExportCfg(state.exportCfg);
+  const opt=DELIM_OPTIONS.find(o=>o.k===cfg.delim)||DELIM_OPTIONS[0];
+  const fields=cfg.order.filter(k=>!cfg.off.includes(k));
+  const fieldStr=fields.map(k=>FIELD_META[k].label).join('、')||'（未选择字段）';
+  return `分隔符：${opt.label} · 字段顺序：${fieldStr} · ${cfg.header? '首行含字段名':'无表头'}`;
+}
 function renderExport(){ if(state.tab==='train') renderTrain(); }
 function renderExportContent(){
-  const fmt = state.exportFormat || 'text';
-  const info = EXPORT_FMT_INFO[fmt] || EXPORT_FMT_INFO.text;
   const txt = buildExport();
   return `<div class="card">
-      <p style="color:var(--sub);font-size:14px">当前格式：${info.name} · ${info.tip} 可在「设置 → 导出格式」中切换。</p>
+      <p style="color:var(--sub);font-size:14px">当前格式：${fmtExportCfg()} 可在「设置 → 导出记录格式」中修改。</p>
       <pre id="export-text">${escHtml(txt)}</pre>
       <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
       <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="exportToNoteAndReset()">🔄 重置计时器并导出到笔记</button>
@@ -786,12 +778,26 @@ function renderSettings(){
         <span class="chip ${p.sound===4?'on':''}" onclick="setSoundMode(4)">🎐 风铃声</span>
         <span class="chip ${p.sound===1?'on':''}" onclick="setSoundMode(1)">🎵 跟随系统闹铃</span>
       </div>
-      <div class="field-label" style="margin-top:14px">导出格式 <span style="color:#666;font-size:12px">（导出页按此格式生成预览和复制内容）</span></div>
+      <div class="field-label" style="margin-top:14px">导出记录格式 <span style="color:#666;font-size:12px">（字段顺序 + 分隔符；导出页按此生成预览和复制内容）</span></div>
+      <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">字段之间的分隔符</div>
       <div class="chips">
-        <span class="chip ${state.exportFormat==='text'?'on':''}" onclick="setExportFormat('text')">📄 纯文本</span>
-        <span class="chip ${state.exportFormat==='csv'?'on':''}" onclick="setExportFormat('csv')">📊 CSV 表格</span>
-        <span class="chip ${state.exportFormat==='md'?'on':''}" onclick="setExportFormat('md')">📝 Markdown</span>
-        <span class="chip ${state.exportFormat==='json'?'on':''}" onclick="setExportFormat('json')">🧩 JSON</span>
+        ${DELIM_OPTIONS.map(o=>`<span class="chip ${state.exportCfg.delim===o.k?'on':''}" onclick="setDelim('${o.k}')">${o.label}</span>`).join('')}
+      </div>
+      ${state.exportCfg.delim==='custom'? `<input class="inline-input" style="margin-top:8px" placeholder="输入自定义分隔符，如： = " value="${escHtml(state.exportCfg.custom||'')}" oninput="setCustomDelim(this.value)">` : ''}
+      <div class="field-label" style="font-size:12px;color:#666;margin-top:12px">字段顺序（勾选要导出的字段，▲/▼ 调整顺序）</div>
+      <div class="exp-field-list">
+        ${state.exportCfg.order.map((k,i)=>`
+          <div class="exp-field-row">
+            <input type="checkbox" ${state.exportCfg.off.includes(k)?'':'checked'} onchange="toggleField('${k}')">
+            <span class="exp-field-name">${FIELD_META[k]?FIELD_META[k].label:k}</span>
+            <span class="exp-field-mv">
+              <button class="btn btn-ghost" style="padding:2px 8px;margin:0 2px" onclick="moveField(${i},-1)">▲</button>
+              <button class="btn btn-ghost" style="padding:2px 8px;margin:0 2px" onclick="moveField(${i},1)">▼</button>
+            </span>
+          </div>`).join('')}
+      </div>
+      <div style="margin-top:10px;font-size:14px;color:var(--txt)">
+        <label><input type="checkbox" ${state.exportCfg.header?'checked':''} onchange="setHeader(this.checked)"> 首行输出字段名</label>
       </div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
@@ -837,8 +843,21 @@ function setSoundMode(m){
   try{ if(window.FitnessNative && window.FitnessNative.setAlarmSound) window.FitnessNative.setAlarmSound(m); }catch(e){}
   renderSettings();
 }
-function setExportFormat(f){
-  state.exportFormat=f; persist(); renderSettings();
+function setDelim(k){ state.exportCfg.delim=k; persist(); renderSettings(); }
+function setCustomDelim(v){ state.exportCfg.custom=v; persist(); }
+function setHeader(on){ state.exportCfg.header=!!on; persist(); renderSettings(); }
+function toggleField(k){
+  const off=state.exportCfg.off;
+  const i=off.indexOf(k);
+  if(i>=0) off.splice(i,1); else off.push(k);
+  persist(); renderSettings();
+}
+function moveField(i,dir){
+  const order=state.exportCfg.order;
+  const j=i+dir;
+  if(j<0 || j>=order.length) return;
+  const tmp=order[i]; order[i]=order[j]; order[j]=tmp;
+  persist(); renderSettings();
 }
 window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };
 
