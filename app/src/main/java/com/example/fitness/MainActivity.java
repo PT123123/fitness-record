@@ -1,6 +1,7 @@
 package com.example.fitness;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlarmManager;
@@ -14,6 +15,8 @@ import android.provider.Settings;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -51,6 +54,29 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);       // 允许自动播放提示音
 
         web.setWebViewClient(new WebViewClient());
+        // 必须实现 WebChromeClient，否则 JS 的 confirm()/alert() 在 WebView 中不弹窗
+        // （confirm 会直接返回 false，导致「重置计时器并导出到笔记」的确认步骤直接中止）
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton("确定", (d, w) -> result.confirm())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton("确定", (d, w) -> result.confirm())
+                        .setNegativeButton("取消", (d, w) -> result.cancel())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+        });
         web.addJavascriptInterface(new FitnessNativeBridge(this), "FitnessNative");
 
         // 载入本地 HTML（assets/index.html）
