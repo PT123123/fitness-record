@@ -235,6 +235,7 @@ let state = {
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t}
   editingIdx:null,
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
+  exportFormat:'text', // 导出格式: text | csv | md | json
 };
 let showManual = false;
 let recDraft = { part:'', action:'', rest:60, reps:'', weight:'', note:'', t:'' };
@@ -246,12 +247,13 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
+  if(d.exportFormat) state.exportFormat=d.exportFormat;
   // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, exportFormat:state.exportFormat})); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -588,15 +590,26 @@ function addManual(){
 }
 function delRecord(id){ state.records=state.records.filter(r=>r.id!==id); persist(); renderTimer(); renderExport(); }
 
-/* ============ 导出（每次点开自动预览）============ */
-function buildExportText(){
-  let txt='🏋️ 健身训练记录\n'+'='.repeat(40)+'\n\n';
+/* ============ 导出（每次点开自动预览；格式在「设置 → 导出格式」中切换）============ */
+function collectExportItems(){
   const items=[];
   state.groups.forEach(g=>{
     if(!(g.part||g.action||g.reps||g.note)) return;
     items.push({ date:today(), t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight||'', note:g.note||'' });
   });
   state.records.forEach(r=> items.push({ date:r.date, t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight||'', note:r.note||'' }));
+  return items;
+}
+function sortItems(items){
+  return items.slice().sort((a,b)=> (a.date<b.date?-1:a.date>b.date?1:0) || (a.t||'').localeCompare(b.t||''));
+}
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function csvEsc(v){ v=String(v==null?'':v); return /[",\r\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"' : v; }
+function mdEsc(v){ return String(v==null?'':v).replace(/\|/g,'\\|').replace(/\r?\n/g,' '); }
+
+function buildExportText(){
+  let txt='🏋️ 健身训练记录\n'+'='.repeat(40)+'\n\n';
+  const items=collectExportItems();
   const byDate={};
   items.forEach(it=>{ (byDate[it.date]=byDate[it.date]||[]).push(it); });
   const dates=Object.keys(byDate).sort();
@@ -610,13 +623,65 @@ function buildExportText(){
   });
   return txt;
 }
+function buildExportCsv(){
+  const head=['日期','时间','部位','动作','次数','重量(kg)','休息(秒)','备注'];
+  const items=sortItems(collectExportItems());
+  if(items.length===0) return head.join(',')+'\n（暂无记录）';
+  const lines=[head.join(',')];
+  items.forEach(r=> lines.push([r.date,r.t,r.part,r.action,r.reps,r.weight,r.rest,r.note].map(csvEsc).join(',')));
+  return lines.join('\n');
+}
+function buildExportMarkdown(){
+  const items=collectExportItems();
+  const byDate={};
+  items.forEach(it=>{ (byDate[it.date]=byDate[it.date]||[]).push(it); });
+  const dates=Object.keys(byDate).sort();
+  let md='# 🏋️ 健身训练记录\n\n';
+  if(dates.length===0) return md+'（暂无记录）\n';
+  dates.forEach(date=>{
+    md+=`## ${date}\n\n`;
+    md+='| 时间 | 部位 | 动作 | 次数 | 重量(kg) | 休息(秒) | 备注 |\n';
+    md+='| --- | --- | --- | --- | --- | --- | --- |\n';
+    byDate[date].forEach(r=>{
+      md+=`| ${mdEsc(r.t)} | ${mdEsc(r.part)} | ${mdEsc(r.action)} | ${mdEsc(r.reps)} | ${mdEsc(r.weight)} | ${mdEsc(r.rest)} | ${mdEsc(r.note)} |\n`;
+    });
+    md+='\n';
+  });
+  return md;
+}
+function buildExportJson(){
+  const items=sortItems(collectExportItems());
+  const obj={
+    app:'健身训练记录',
+    exportedAt:`${today()} ${nowTime()}`,
+    count:items.length,
+    records:items.map(r=>({ date:r.date, time:r.t, part:r.part, action:r.action, reps:r.reps, weight:r.weight, rest:r.rest, note:r.note }))
+  };
+  return JSON.stringify(obj, null, 2);
+}
+function buildExport(){
+  switch(state.exportFormat){
+    case 'csv': return buildExportCsv();
+    case 'md': return buildExportMarkdown();
+    case 'json': return buildExportJson();
+    default: return buildExportText();
+  }
+}
+const EXPORT_FMT_INFO = {
+  text:{ name:'纯文本', tip:'纯文本预览，可粘贴到备忘录 / 微信等任意地方。' },
+  csv:{ name:'CSV 表格', tip:'CSV 表格，可用 Excel / WPS 直接打开或导入。' },
+  md:{ name:'Markdown', tip:'Markdown 表格，适合贴到 Notion / 博客 / 语雀。' },
+  json:{ name:'JSON', tip:'JSON 数据，适合程序处理或存档。' },
+};
 function renderExport(){
   if(state.tab!=='export') return;
-  const txt = buildExportText();
+  const fmt = state.exportFormat || 'text';
+  const info = EXPORT_FMT_INFO[fmt] || EXPORT_FMT_INFO.text;
+  const txt = buildExport();
   $('app').innerHTML=`<h2>📤 导出</h2>
     <div class="card">
-      <p style="color:var(--sub);font-size:14px">纯文本预览，可粘贴到备忘录 / Notion / 微信等任意地方。</p>
-      <pre id="export-text">${txt}</pre>
+      <p style="color:var(--sub);font-size:14px">当前格式：${info.name} · ${info.tip} 可在「设置 → 导出格式」中切换。</p>
+      <pre id="export-text">${escHtml(txt)}</pre>
       <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
     </div>`;
 }
@@ -690,6 +755,13 @@ function renderSettings(){
         <span class="chip ${p.sound===4?'on':''}" onclick="setSoundMode(4)">🎐 风铃声</span>
         <span class="chip ${p.sound===1?'on':''}" onclick="setSoundMode(1)">🎵 跟随系统闹铃</span>
       </div>
+      <div class="field-label" style="margin-top:14px">导出格式 <span style="color:#666;font-size:12px">（导出页按此格式生成预览和复制内容）</span></div>
+      <div class="chips">
+        <span class="chip ${state.exportFormat==='text'?'on':''}" onclick="setExportFormat('text')">📄 纯文本</span>
+        <span class="chip ${state.exportFormat==='csv'?'on':''}" onclick="setExportFormat('csv')">📊 CSV 表格</span>
+        <span class="chip ${state.exportFormat==='md'?'on':''}" onclick="setExportFormat('md')">📝 Markdown</span>
+        <span class="chip ${state.exportFormat==='json'?'on':''}" onclick="setExportFormat('json')">🧩 JSON</span>
+      </div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
         <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
@@ -733,6 +805,9 @@ function testReminder(){
 function setSoundMode(m){
   try{ if(window.FitnessNative && window.FitnessNative.setAlarmSound) window.FitnessNative.setAlarmSound(m); }catch(e){}
   renderSettings();
+}
+function setExportFormat(f){
+  state.exportFormat=f; persist(); renderSettings();
 }
 window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };
 
