@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>健身训练记录</title>
+<script src="version.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   :root{
@@ -23,6 +24,7 @@
     border-radius:10px; cursor:pointer; line-height:1; }
   .tb-btn:active{ background:var(--card2); }
   .tb-title{ font-size:16px; font-weight:700; }
+  .tb-ver{ font-size:11px; color:var(--sub); font-weight:400; margin-left:6px; }
 
   /* 侧边栏 */
   .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:65; opacity:0;
@@ -157,7 +159,7 @@
 <body>
 <div class="topbar">
   <button class="tb-btn" onclick="openSidebar()" aria-label="菜单">☰</button>
-  <div class="tb-title">🏋️ 健身训练记录</div>
+  <div class="tb-title">🏋️ 健身训练记录<span id="app-version" class="tb-ver"></span></div>
   <button class="tb-btn" onclick="switchTab('settings')" aria-label="设置">⚙</button>
 </div>
 <div class="backdrop" id="backdrop" onclick="closeSidebar()"></div>
@@ -1030,6 +1032,8 @@ function switchTab(tab){
 function init(){
   load(); loadNotes(); renderTrain(); tick();
   refreshSidebar();
+  const verEl=$('app-version');
+  if(verEl) verEl.textContent = window.APP_VERSION ? 'v'+window.APP_VERSION : '';
   window.addEventListener('beforeunload', persist);
 }
 init();
