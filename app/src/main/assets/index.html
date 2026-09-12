@@ -25,6 +25,7 @@
   .tb-btn:active{ background:var(--card2); }
   .tb-title{ font-size:16px; font-weight:700; }
   .tb-ver{ font-size:11px; color:var(--sub); font-weight:400; margin-left:6px; }
+  .tb-spacer{ width:44px; height:44px; }
 
   /* 侧边栏 */
   .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:65; opacity:0;
@@ -218,13 +219,42 @@
   .as-cancel{ margin-top:2px; }
   .note-actions{ display:flex; gap:10px; margin-top:12px; }
   .note-actions .btn{ padding:12px; font-size:14px; }
+
+  /* HIIT 阶段徽标 + 爬楼组间休息条 */
+  .phase-badge{ text-align:center; font-size:15px; font-weight:700; border-radius:10px; padding:8px; margin-bottom:8px; }
+  .phase-badge.work{ background:rgba(79,195,247,.15); color:var(--acc); }
+  .phase-badge.rest{ background:rgba(46,158,91,.15); color:var(--acc2); }
+  .rest-bar{ background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:12px;
+    display:flex; align-items:center; gap:10px; }
+  .rest-bar .rb-time{ font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--acc2); min-width:92px; }
+  .rest-bar .rb-info{ flex:1; color:var(--sub); font-size:13px; line-height:1.5; }
+  .rest-bar .rb-info b{ color:var(--acc2); font-size:15px; }
+  .rest-bar.done{ border-color:var(--warn); }
+  .rest-bar.done .rb-time{ color:var(--warn); }
+  .rest-bar .btn{ flex:none; padding:10px 12px; font-size:13px; margin:0; }
+  .phase-badge.setRest{ background:rgba(255,167,38,.15); color:#ffa726; }
+  .hiit-progress{ height:8px; background:var(--card2); border-radius:4px; margin:10px 0; overflow:hidden; }
+  .hiit-progress .fill{ height:100%; border-radius:4px; transition:width .2s; }
+  .hiit-progress .fill.work{ background:var(--acc); }
+  .hiit-progress .fill.rest{ background:var(--acc2); }
+  .hiit-progress .fill.setRest{ background:#ffa726; }
+  .stair-floors-big{ font-size:56px; font-weight:700; text-align:center; color:var(--acc); margin:4px 0; font-variant-numeric:tabular-nums; }
+  .stair-kcal{ text-align:center; color:var(--sub); font-size:14px; margin-bottom:10px; }
+  .floor-btns{ display:flex; gap:8px; margin:10px 0; }
+  .floor-btns button{ flex:1; padding:14px 6px; border:1px solid var(--line); background:var(--card2); color:var(--acc); border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; }
+  .floor-btns button:active{ background:var(--chip); }
+  /* 铃声按场景设置 */
+  .sound-scene-list{ margin-top:8px; }
+  .sound-scene-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .sound-scene-name{ flex:1; font-size:14px; color:var(--txt); }
+  .sound-scene-select{ padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card2); color:var(--txt); font-size:13px; min-width:130px; }
 </style>
 </head>
 <body>
 <div class="topbar">
   <button class="tb-btn" onclick="openSidebar()" aria-label="菜单">☰</button>
   <div class="tb-title">🏋️ 健身训练记录<span id="app-version" class="tb-ver"></span></div>
-  <button class="tb-btn" onclick="switchTab('settings')" aria-label="设置">⚙</button>
+  <div class="tb-spacer" aria-hidden="true"></div>
 </div>
 <div class="backdrop" id="backdrop" onclick="closeSidebar()"></div>
 <aside class="sidebar" id="sidebar">
@@ -234,6 +264,8 @@
   </div>
   <nav class="sb-nav">
     <button data-tab="train" onclick="goTab('train')">⏱ 训练</button>
+    <button data-tab="hiit" onclick="goTab('hiit')">🔥 HIIT</button>
+    <button data-tab="stair" onclick="goTab('stair')">🧗 爬楼</button>
     <button data-tab="notes" onclick="goTab('notes')">📝 笔记</button>
     <button data-tab="settings" onclick="goTab('settings')">⚙ 设置</button>
   </nav>
@@ -352,10 +384,14 @@ function setTime(disp, sub){
   if(el) el.textContent=disp; if(sb) sb.textContent=sub;
 }
 function startTimer(){
+  if(state.mode==='countdown'){
+    if(state.cdTotal<=0){ state.cdTotal=60; state.cdLeft=60; }  // 防御：时长不能为 0（0 秒会瞬间触发系统闹钟，甚至崩溃）
+    if(state.cdLeft<=0) state.cdLeft=state.cdTotal;              // 已归零 → 从头开始，而不是从 0 继续
+  }
   state.running=true;
   state.startedAt = Date.now() - (state.mode==='countup'? state.elapsed : (state.cdTotal-state.cdLeft)*1000);
   if(state.lastLapAt===0) state.lastLapAt = state.mode==='countup'? state.elapsed : 0;
-  if(state.mode==='countdown') Native.scheduleCountdown(state.cdTotal, state.startedAt + state.cdTotal*1000);
+  if(state.mode==='countdown' && state.cdTotal>0) Native.scheduleCountdown(state.cdTotal, state.startedAt + state.cdTotal*1000);
   timerId = setInterval(tick, 200);
   renderTimer();
 }
@@ -370,7 +406,7 @@ function setMode(m){
   if(state.running) pauseTimer();
   state.mode=m;
   if(m==='countup'){ state.elapsed=0; state.lastLapAt=0; }
-  else { state.cdLeft=state.cdTotal; }
+  else { state.cdLeft=state.cdTotal; state.lastLapAt=0; }
   renderTimer();
 }
 /* 供安卓原生弹窗「再休息 X 分钟」回调：切到倒计时并启动 */
@@ -386,13 +422,17 @@ function getCurrent(){ return state.mode==='countup'? state.elapsed : (state.cdT
 /* 新增一组（正计时/倒计时共用），自动继承上一组动作，并记录当前时间 */
 function addGroup(extra){
   const cur = getCurrent();
-  const split = state.lastLapAt ? cur - state.lastLapAt : cur;
+  let split = state.lastLapAt ? cur - state.lastLapAt : cur;
+  if(split<0) split=0;   // lastLapAt 跨模式残留时禁止出现负值
   const g = Object.assign({
     idx: state.groups.length+1, cumul:cur, split:split,
     part:groupDefaults.part, action:groupDefaults.action,
     reps:groupDefaults.reps, weight:groupDefaults.weight,
     note:'', rest: Math.round(split/1000), t: nowTime(), done:false
   }, extra||{});
+  if(g.rest==null) g.rest=Math.round((g.split||0)/1000);
+  if(g.rest<0) g.rest=0;
+  if(g.split<0) g.split=0;
   state.groups.push(g);
   state.lastLapAt = cur;
   state.editingIdx = state.groups.length-1;
@@ -400,7 +440,12 @@ function addGroup(extra){
 }
 function lap(){
   const cur = getCurrent();
-  if(!state.running && cur===0){ startTimer(); return; }
+  if(state.mode==='countup' && !state.running && cur===0){ startTimer(); return; }  // 正计时未开始→先启动
+  if(state.mode==='countdown' && cur===0){
+    // 倒计时未开始：不自动启动，只把当前倒计时时长记进这一组
+    addGroup({ split: state.cdTotal*1000, rest: state.cdTotal });
+    return;
+  }
   addGroup({});
 }
 /* 倒计时休息结束 → 直接并入同一份组记录，并自动选上一组动作 + 记录此刻时间 */
@@ -418,7 +463,7 @@ function recordRestGroup(){
   addGroup({ split:restMs, rest:restSec, cumul: state.elapsed + restMs });
   // 记录完回到正计时，准备下一组
   state.mode='countup';
-  state.elapsed=0; state.cdLeft=state.cdTotal;
+  state.elapsed=0; state.cdLeft=state.cdTotal; state.lastLapAt=0;
   state.running=false; clearInterval(timerId);
   renderTimer();
 }
@@ -433,8 +478,8 @@ function closeEdit(){ state.editingIdx=null; renderTimer(); }
 function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
 function pickAction(i,a){ updateGroup(i,{action:a}); }
 function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
-function setCdMin(v){ state.cdTotal = parseInt(v)*60 + (state.cdTotal%60); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
-function setCdSec(v){ state.cdTotal = Math.floor(state.cdTotal/60)*60 + parseInt(v); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
+function setCdMin(v){ const t=Math.max(5, parseInt(v)*60 + (state.cdTotal%60)); state.cdTotal=t; state.cdLeft=state.cdTotal; persist(); renderTimer(); }
+function setCdSec(v){ const t=Math.max(5, Math.floor(state.cdTotal/60)*60 + parseInt(v)); state.cdTotal=t; state.cdLeft=state.cdTotal; persist(); renderTimer(); }
 
 function saveGroupsToHistory(){
   const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
@@ -453,14 +498,19 @@ let _focus = null;
 function captureFocus(){
   const a = document.activeElement;
   if(!a || !a.dataset || !a.dataset.fid || !a.closest('#app')){ _focus=null; return; }
-  let start=0, end=0; try{ start=a.selectionStart||0; end=a.selectionEnd||0; }catch(e){}
+  let start=null, end=null; try{ start=a.selectionStart; end=a.selectionEnd; }catch(e){}
+  // 个别浏览器/输入类型读不到光标位置时，回退为“光标放末尾”，避免跳到开头把数字打反
+  if(start==null || end==null){ start=(a.value||'').length; end=start; }
   _focus = { fid:a.dataset.fid, start, end };
 }
 function restoreFocus(){
   if(!_focus) return;
-  const el = document.querySelector('#app [data-fid="'+_focus.fid+'"]');
-  if(el){ el.focus(); try{ el.setSelectionRange(_focus.start, _focus.end); }catch(e){} }
-  _focus = null;
+  const f=_focus; _focus=null;
+  const el = document.querySelector('#app [data-fid="'+f.fid+'"]');
+  if(!el) return;
+  el.focus();
+  try{ el.setSelectionRange(f.start, f.end); }
+  catch(e){ try{ const L=(el.value||'').length; el.setSelectionRange(L,L); }catch(_){} }
 }
 
 /* ============ 渲染：计时器（含记录/历史）============ */
@@ -475,12 +525,12 @@ function renderGroupEdit(i){
     <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
     <div class="row2" style="margin-top:10px">
       <div style="flex:1"><div class="field-label">次数 (RM)</div>
-        <input class="inline-input" type="number" ${fid('reps')} placeholder="7" value="${g.reps||''}" oninput="updateGroup(${i},{reps:this.value})"></div>
+        <input class="inline-input" type="text" inputmode="numeric" ${fid('reps')} placeholder="7" value="${g.reps||''}" oninput="updateGroup(${i},{reps:this.value})"></div>
       <div style="flex:1"><div class="field-label">重量 kg</div>
-        <input class="inline-input" type="number" ${fid('weight')} placeholder="100" value="${g.weight||''}" oninput="updateGroup(${i},{weight:this.value})"></div>
+        <input class="inline-input" type="text" inputmode="numeric" ${fid('weight')} placeholder="100" value="${g.weight||''}" oninput="updateGroup(${i},{weight:this.value})"></div>
     </div>
     <div class="field-label">休息时间（秒，可手动填 / 点选预设）</div>
-    <input class="inline-input" type="number" min="0" ${fid('rest')} placeholder="180" value="${g.rest||''}" oninput="updateGroup(${i},{rest:parseInt(this.value)||0})">
+    <input class="inline-input" type="text" inputmode="numeric" min="0" ${fid('rest')} placeholder="180" value="${g.rest||''}" oninput="updateGroup(${i},{rest:parseInt(this.value)||0})">
     <div class="chips" style="margin-top:8px">${REST_OPTIONS.slice(0,7).map(r=>`<span class="chip ${g.rest==r?'on':''}" onclick="updateGroup(${i},{rest:${r}})">${r}秒</span>`).join('')}</div>
     <div class="field-label">笔记（如：好酸 / 状态不错）</div>
     <input class="inline-input" ${fid('note')} placeholder="可选" value="${g.note||''}" oninput="updateGroup(${i},{note:this.value})">
@@ -537,7 +587,7 @@ function renderTimerContent(){
     </div>`;
   } else {
     html+=`<div class="btn-row">
-      <button class="btn btn-primary" onclick="startTimer()">${s.elapsed>0||(s.mode==='countdown'&&s.cdLeft<s.cdTotal)?'▶ 继续':'▶ 开始'}</button>
+      <button class="btn btn-primary" onclick="startTimer()">${s.elapsed>0||(s.mode==='countdown'&&s.cdLeft>0&&s.cdLeft<s.cdTotal)?'▶ 继续':'▶ 开始'}</button>
       <button class="btn btn-ghost" onclick="resetTimer()">↺ 重置</button>
     </div>`;
   }
@@ -605,7 +655,7 @@ function renderRecordSection(){
         <div style="flex:1"><div class="field-label">记录时间</div>
           <input class="inline-input" type="time" value="${d.t||nowTime()}" oninput="recDraft.t=this.value;updateRecPreview()"></div>
         <div style="flex:1"><div class="field-label">休息（秒，可手动填）</div>
-          <input class="inline-input" type="number" min="0" placeholder="180" value="${d.rest||''}" oninput="recDraft.rest=parseInt(this.value)||0;updateRecPreview()"></div>
+          <input class="inline-input" type="text" inputmode="numeric" min="0" placeholder="180" value="${d.rest||''}" oninput="recDraft.rest=parseInt(this.value)||0;updateRecPreview()"></div>
       </div>
       <div class="chips" style="margin-top:8px">${REST_OPTIONS.map(r=>`<span class="chip ${d.rest==r?'on':''}" onclick="recDraft.rest=${r};renderTimer()">${fmtRest(r)||r+'秒'}</span>`).join('')}</div>
       <div class="field-label">部位</div>
@@ -615,9 +665,9 @@ function renderRecordSection(){
       <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview()">
       <div class="row2" style="margin-top:12px">
         <div style="flex:1"><div class="field-label">次数(RM)</div>
-          <input class="inline-input" type="number" placeholder="7" value="${d.reps||''}" oninput="recDraft.reps=this.value;updateRecPreview()"></div>
+          <input class="inline-input" type="text" inputmode="numeric" placeholder="7" value="${d.reps||''}" oninput="recDraft.reps=this.value;updateRecPreview()"></div>
         <div style="flex:1"><div class="field-label">重量(kg)</div>
-          <input class="inline-input" type="number" placeholder="100" value="${d.weight||''}" oninput="recDraft.weight=this.value;updateRecPreview()"></div>
+          <input class="inline-input" type="text" inputmode="numeric" placeholder="100" value="${d.weight||''}" oninput="recDraft.weight=this.value;updateRecPreview()"></div>
       </div>
       <div class="field-label">笔记</div>
       <input class="inline-input" placeholder="好酸" value="${d.note||''}" oninput="recDraft.note=this.value;updateRecPreview()">
@@ -685,8 +735,38 @@ const DELIM_OPTIONS = [
   {k:'space', label:'空格',  v:' '},
   {k:'semi',  label:'分号 ;', v:';'},
   {k:'pipe',  label:'竖线 |', v:'|'},
-  {k:'custom',label:'✏️ 自定义', v:''}
+  {k:'custom',label:'自定义', v:''}
 ];
+
+/* ============ 铃声配置：15 种铃声 + 7 个场景 ============ */
+const SOUND_MODES = [
+  {k:0,  name:'门铃叮咚'},
+  {k:1,  name:'跟随系统闹铃'},
+  {k:2,  name:'滴滴滴'},
+  {k:3,  name:'敲门声'},
+  {k:4,  name:'风铃声'},
+  {k:5,  name:'喇叭号角'},
+  {k:6,  name:'鼓点'},
+  {k:7,  name:'锣声'},
+  {k:8,  name:'钢琴音'},
+  {k:9,  name:'心跳'},
+  {k:10, name:'哨声'},
+  {k:11, name:'电子提示音'},
+  {k:12, name:'钟声'},
+  {k:13, name:'鸟鸣'},
+  {k:14, name:'蜂鸣器'},
+];
+const SOUND_SCENES = [
+  {k:0, name:'训练倒计时结束'},
+  {k:1, name:'HIIT 运动结束'},
+  {k:2, name:'HIIT 休息结束'},
+  {k:3, name:'HIIT 组间休息结束'},
+  {k:4, name:'HIIT 训练完成'},
+  {k:5, name:'爬楼休息结束'},
+  {k:6, name:'爬楼完成'},
+];
+let soundCfg = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+let soundTestScene = 0;
 function sanitizeExportCfg(c){
   c=c||{};
   const known=Object.keys(FIELD_META);
@@ -771,6 +851,530 @@ function exportToNoteAndReset(){
 function copyExport(){ const t=$('export-text').textContent;
   navigator.clipboard.writeText(t).then(()=>alert('已复制 ✔')).catch(()=>alert('复制失败，请手动选取')); }
 
+/* ============ HIIT 页（组/轮/组间休息结构 + 阶段提醒 + 导出）============ */
+const HIIT_LS = 'fitness_hiit_v2';
+const HIIT_PRESETS = [
+  { name:'Tabata',    work:20,  rest:10,  rounds:8,  sets:1, setRest:0  },
+  { name:'HIIT 30/30', work:30,  rest:30,  rounds:10, sets:1, setRest:0  },
+  { name:'4x4 间歇',   work:240, rest:180, rounds:1,  sets:4, setRest:0  },
+  { name:'3组×8轮',    work:30,  rest:30,  rounds:8,  sets:3, setRest:60 },
+];
+let hiit = {
+  tab:'record',
+  workSec:30, restSec:30, roundsPerSet:10, sets:3, setRestSec:60,
+  running:false, finished:false,
+  phase:'work',            // work | rest | setRest
+  currentSet:1, currentRound:1,
+  phaseLeft:30, phaseEndAt:0, timerId:null,
+  startAt:0, totalElapsed:0,
+  sessions:[],             // {date,t,work,rest,rounds,sets,setRest,duration}
+};
+function loadHiit(){ try{ const d=JSON.parse(localStorage.getItem(HIIT_LS)||'{}');
+  if(Array.isArray(d.sessions)) hiit.sessions=d.sessions;
+  const ws=parseInt(d.workSec,10); if(ws>0&&ws<=3600) hiit.workSec=ws;
+  const rs=parseInt(d.restSec,10); if(rs>0&&rs<=3600) hiit.restSec=rs;
+  const rp=parseInt(d.roundsPerSet,10); if(rp>0&&rp<=100) hiit.roundsPerSet=rp;
+  const st=parseInt(d.sets,10); if(st>0&&st<=50) hiit.sets=st;
+  const sr=parseInt(d.setRestSec,10); if(sr>=0&&sr<=3600) hiit.setRestSec=sr;
+  hiit.running=false; hiit.finished=false; hiit.phase='work'; hiit.currentSet=1; hiit.currentRound=1;
+  hiit.phaseLeft=hiit.workSec; hiit.timerId=null;
+}catch(e){} }
+function persistHiit(){ localStorage.setItem(HIIT_LS, JSON.stringify({sessions:hiit.sessions, workSec:hiit.workSec, restSec:hiit.restSec, roundsPerSet:hiit.roundsPerSet, sets:hiit.sets, setRestSec:hiit.setRestSec})); }
+
+function setHiitTab(t){ hiit.tab=t; renderHiit(); }
+function applyHiitPreset(i){
+  if(hiit.running){ alert('训练进行中，请先重置'); return; }
+  const p=HIIT_PRESETS[i];
+  hiit.workSec=p.work; hiit.restSec=p.rest; hiit.roundsPerSet=p.rounds;
+  hiit.sets=p.sets; hiit.setRestSec=p.setRest;
+  hiitReset();
+}
+function setHiitParam(key,val){
+  if(hiit.running){ alert('训练进行中，请先重置再调整参数'); return; }
+  const v=parseInt(val,10); if(isNaN(v)||v<0) return;
+  hiit[key]=Math.max(key==='setRestSec'?0:1, v);
+  hiit.phaseLeft=hiit.workSec;
+  persistHiit(); renderHiit();
+}
+function hiitOpts(list,cur){ if(!list.includes(cur)) list=[cur].concat(list).sort((a,b)=>a-b); return list; }
+
+function hiitStart(){
+  if(hiit.running){ hiitPause(); return; }
+  if(hiit.finished){ hiitReset(); }
+  hiit.running=true;
+  hiit.startAt = Date.now() - hiit.totalElapsed;
+  hiit.phaseEndAt = Date.now() + hiit.phaseLeft*1000;
+  Native.scheduleCountdown(hiit.phaseLeft, hiit.phaseEndAt);
+  hiit.timerId = setInterval(hiitTick, 200);
+  renderHiit();
+}
+function hiitPause(){
+  if(!hiit.running) return;
+  Native.cancelCountdown();
+  hiit.running=false; clearInterval(hiit.timerId);
+  hiit.totalElapsed = Date.now() - hiit.startAt;
+  hiit.phaseLeft = Math.max(0, Math.round((hiit.phaseEndAt - Date.now())/1000));
+  renderHiit();
+}
+function hiitReset(){
+  Native.cancelCountdown();
+  hiit.running=false; hiit.finished=false; clearInterval(hiit.timerId);
+  hiit.phase='work'; hiit.currentSet=1; hiit.currentRound=1;
+  hiit.phaseLeft=hiit.workSec; hiit.totalElapsed=0; hiit.startAt=0;
+  renderHiit();
+}
+function hiitSkipPhase(){
+  if(!hiit.running) return;
+  hiit.phaseEndAt = Date.now();   // 强制当前阶段立即结束
+}
+function hiitFirePhase(label){
+  Native.cancelCountdown();
+  const sec = hiit.phase==='work'? hiit.workSec : hiit.phase==='rest'? hiit.restSec : hiit.setRestSec;
+  const st = hiit.phase==='work'? 1 : hiit.phase==='rest'? 2 : 3;
+  Native.fire({ restSeconds:sec, label, at:nowTime(), soundType:st });
+}
+function hiitTick(){
+  if(!hiit.running) return;
+  hiit.phaseLeft = Math.max(0, Math.round((hiit.phaseEndAt - Date.now())/1000));
+  hiitPaint();
+  if(hiit.phaseLeft>0) return;
+
+  // —— 阶段结束，切换下一阶段 ——
+  if(hiit.phase==='work'){
+    const isLastRound = hiit.currentRound >= hiit.roundsPerSet;
+    const isLastSet   = hiit.currentSet >= hiit.sets;
+    if(isLastRound && isLastSet){ hiitFinish(); return; }
+    hiit.phase='rest'; hiit.phaseLeft=hiit.restSec;
+    hiitFirePhase('HIIT 运动结束 · 休息 '+hiit.restSec+' 秒');
+  } else if(hiit.phase==='rest'){
+    if(hiit.currentRound >= hiit.roundsPerSet){
+      // 本组完成
+      if(hiit.currentSet < hiit.sets && hiit.setRestSec > 0){
+        hiit.phase='setRest'; hiit.phaseLeft=hiit.setRestSec;
+        hiitFirePhase('HIIT 第'+hiit.currentSet+'组完成 · 组间休息 '+hiit.setRestSec+' 秒');
+      } else {
+        hiit.currentSet++; hiit.currentRound=1;
+        hiit.phase='work'; hiit.phaseLeft=hiit.workSec;
+        hiitFirePhase('HIIT 开始第'+hiit.currentSet+'组');
+      }
+    } else {
+      hiit.currentRound++;
+      hiit.phase='work'; hiit.phaseLeft=hiit.workSec;
+      hiitFirePhase('HIIT 休息结束 · 第'+hiit.currentRound+'轮');
+    }
+  } else { // setRest
+    hiit.currentSet++; hiit.currentRound=1;
+    hiit.phase='work'; hiit.phaseLeft=hiit.workSec;
+    hiitFirePhase('HIIT 组间休息结束 · 开始第'+hiit.currentSet+'组');
+  }
+  hiit.phaseEndAt = Date.now() + hiit.phaseLeft*1000;
+  Native.scheduleCountdown(hiit.phaseLeft, hiit.phaseEndAt);
+  hiitPaint();
+}
+function hiitFinish(){
+  hiit.running=false; hiit.finished=true; clearInterval(hiit.timerId);
+  Native.cancelCountdown();
+  hiit.totalElapsed = Date.now() - hiit.startAt;
+  hiit.sessions.unshift({
+    date:today(), t:nowTime(),
+    work:hiit.workSec, rest:hiit.restSec,
+    rounds:hiit.roundsPerSet, sets:hiit.sets, setRest:hiit.setRestSec,
+    duration:hiit.totalElapsed,
+  });
+  persistHiit();
+  Native.fire({ restSeconds:0, label:'HIIT 训练完成', at:nowTime(), soundType:4 });
+  renderHiit();
+}
+function hiitPhaseLabel(){
+  return hiit.phase==='work'?'🏃 运动中': hiit.phase==='rest'?'☕ 休息中':'⏳ 组间休息';
+}
+function hiitPhaseTotal(){
+  return hiit.phase==='work'? hiit.workSec : hiit.phase==='rest'? hiit.restSec : hiit.setRestSec;
+}
+function hiitPaint(){
+  const p=$('hiit-phase'); if(p){ p.textContent=hiitPhaseLabel(); p.className='phase-badge '+hiit.phase; }
+  const t=$('hiit-time'); if(t) t.textContent=fmt(hiit.phaseLeft*1000);
+  const s=$('hiit-sub'); if(s) s.textContent=`第 ${hiit.currentSet}/${hiit.sets} 组 · 第 ${hiit.currentRound}/${hiit.roundsPerSet} 轮`;
+  const bar=$('hiit-bar'); if(bar){ const total=hiitPhaseTotal(); bar.style.width = total>0? Math.round((1-hiit.phaseLeft/total)*100)+'%' : '0%'; }
+  const ov=$('hiit-overall'); if(ov){
+    const totalPhases = hiit.sets*hiit.roundsPerSet*2 + (hiit.sets-1)*(hiit.setRestSec>0?1:0);
+    let done = (hiit.currentSet-1)*hiit.roundsPerSet*2 + (hiit.currentRound-1)*2 + (hiit.phase==='rest'||hiit.phase==='setRest'?1:0);
+    if(hiit.currentSet>1 && hiit.setRestSec>0) done += (hiit.currentSet-1);
+    ov.style.width = Math.min(100, Math.round(done/totalPhases*100))+'%';
+  }
+}
+
+function renderHiit(){
+  const tab=hiit.tab;
+  let html=`<h2>🔥 HIIT 间歇训练</h2>
+    <div class="mode-toggle">
+      <button class="${tab==='record'?'on':''}" onclick="setHiitTab('record')">⏱ 训练</button>
+      <button class="${tab==='export'?'on':''}" onclick="setHiitTab('export')">📤 导出</button>
+    </div>`;
+  html += tab==='export' ? renderHiitExportContent() : renderHiitRecordContent();
+  $('app').innerHTML=html;
+  hiitPaint();
+}
+function renderHiitTimer(){ if(state.tab==='hiit') renderHiit(); }
+function renderHiitRecordContent(){
+  const h=hiit;
+  if(h.finished){
+    return `<div class="card" style="text-align:center;padding:28px 16px">
+      <div style="font-size:40px;margin-bottom:8px">🎉</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:14px">HIIT 训练完成！</div>
+      <div style="color:var(--sub);font-size:15px;line-height:2">
+        总时长 <b style="color:var(--txt)">${fmt(h.totalElapsed)}</b><br>
+        ${h.sets} 组 × ${h.roundsPerSet} 轮 · 运动${h.workSec}秒/休息${h.restSec}秒${h.setRestSec>0?' · 组间休'+h.setRestSec+'秒':''}
+      </div>
+      <div class="btn-row" style="margin-top:18px">
+        <button class="btn btn-primary" onclick="hiitExportToNote()">📝 导出到笔记</button>
+        <button class="btn btn-ghost" onclick="hiitReset()">🔄 再来一次</button>
+      </div>
+    </div>`;
+  }
+
+  let html=`<div class="card">
+    <div class="field-label" style="margin-top:0">预设协议</div>
+    <div class="chips" style="margin-bottom:12px">${HIIT_PRESETS.map((p,i)=>`<span class="chip ${h.workSec===p.work&&h.restSec===p.rest&&h.roundsPerSet===p.rounds&&h.sets===p.sets?'on':''}" onclick="applyHiitPreset(${i})">${p.name}</span>`).join('')}</div>
+    <div class="dur-set" style="flex-wrap:wrap;gap:6px 10px">
+      <span style="color:var(--sub)">运动</span><select onchange="setHiitParam('workSec',this.value)">${hiitOpts([10,15,20,25,30,40,45,60,90,120,180,240],h.workSec).map(s=>`<option ${h.workSec==s?'selected':''}>${s}</option>`).join('')}</select>秒
+      <span style="color:var(--sub)">休息</span><select onchange="setHiitParam('restSec',this.value)">${hiitOpts([10,15,20,25,30,40,45,60,90,120,180],h.restSec).map(s=>`<option ${h.restSec==s?'selected':''}>${s}</option>`).join('')}</select>秒
+      <span style="color:var(--sub)">每组</span><select onchange="setHiitParam('roundsPerSet',this.value)">${hiitOpts([4,6,8,10,12,15,20],h.roundsPerSet).map(n=>`<option ${h.roundsPerSet==n?'selected':''}>${n}</option>`).join('')}</select>轮
+      <span style="color:var(--sub)"><span style="color:var(--sub)">共</span><select onchange="setHiitParam('sets',this.value)">${hiitOpts([1,2,3,4,5,6,8],h.sets).map(n=>`<option ${h.sets==n?'selected':''}>${n}</option>`).join('')}</select>组</span>
+      <span style="color:var(--sub)">组间休</span><select onchange="setHiitParam('setRestSec',this.value)">${hiitOpts([0,30,45,60,90,120,180],h.setRestSec).map(s=>`<option ${h.setRestSec==s?'selected':''}>${s}</option>`).join('')}</select>秒
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="phase-badge ${h.phase}" id="hiit-phase">${hiitPhaseLabel()}</div>
+    <div class="time-display" id="hiit-time">${fmt(h.phaseLeft*1000)}</div>
+    <div class="hiit-progress"><div class="fill ${h.phase}" id="hiit-bar" style="width:0%"></div></div>
+    <div class="time-sub" id="hiit-sub">第 ${h.currentSet}/${h.sets} 组 · 第 ${h.currentRound}/${h.roundsPerSet} 轮</div>
+    <div class="hiit-progress" style="height:4px;margin:4px 0 14px"><div class="fill" id="hiit-overall" style="width:0%;background:var(--sub)"></div></div>
+    <div class="btn-row">
+      <button class="btn ${h.running?'btn-stop':'btn-primary'}" onclick="hiitStart()">${h.running?'⏸ 暂停':(h.totalElapsed>0?'▶ 继续':'▶ 开始')}</button>
+      <button class="btn btn-ghost" onclick="hiitReset()">↺ 重置</button>
+    </div>
+    ${h.running?`<button class="btn btn-ghost" style="width:100%;margin-top:8px;padding:12px;font-size:14px" onclick="hiitSkipPhase()">⏭ 跳过当前阶段</button>`:''}
+    <p style="color:var(--sub);font-size:12px;margin-top:10px;text-align:center">每个阶段结束自动响铃 + 锁屏提醒；运动→休息→下一轮，组完成后组间休息</p>
+  </div>`;
+
+  // 历史记录
+  html+=`<div class="section-title">📋 历史训练（最近 ${Math.min(hiit.sessions.length,20)} 次）</div>`;
+  if(hiit.sessions.length===0){
+    html+=`<div class="empty">还没有完成的 HIIT 训练<br>选个预设，点「开始」吧 💪</div>`;
+  } else {
+    hiit.sessions.slice(0,20).forEach((s,i)=>{
+      html+=`<div class="hist-item">
+        <span class="h-time">${s.t}</span>
+        <span class="h-body"><span class="h-tag">${s.sets}组×${s.rounds}轮</span>运动${s.work}s/休${s.rest}s${s.setRest>0?'/组间'+s.setRest+'s':''} · ${fmt(s.duration)}</span>
+        <button class="del" onclick="hiitDelSession(${i})">×</button>
+      </div>`;
+    });
+  }
+  return html;
+}
+function hiitDelSession(i){ hiit.sessions.splice(i,1); persistHiit(); renderHiit(); }
+
+const HIIT_FIELDS = [
+  {k:'date',label:'日期'},{k:'time',label:'时间'},{k:'sets',label:'组数'},
+  {k:'rounds',label:'每组轮数'},{k:'work',label:'运动(秒)'},{k:'rest',label:'休息(秒)'},
+  {k:'setRest',label:'组间休息(秒)'},{k:'duration',label:'总时长'}
+];
+function buildHiitExport(){
+  const cfg=sanitizeExportCfg(state.exportCfg);
+  const delim=resolveDelim(cfg);
+  const lines=[];
+  if(cfg.header) lines.push(HIIT_FIELDS.map(f=>f.label).join(delim));
+  hiit.sessions.forEach(s=>{
+    const row={ date:s.date, time:s.t||'', sets:s.sets, rounds:s.rounds, work:s.work, rest:s.rest, setRest:s.setRest||0, duration:fmt(s.duration) };
+    lines.push(HIIT_FIELDS.map(f=>cellEsc(row[f.k],delim)).join(delim));
+  });
+  return lines.length? lines.join('\n') : '（暂无记录）';
+}
+function renderHiitExportContent(){
+  const txt=buildHiitExport();
+  return `<div class="card">
+    <p style="color:var(--sub);font-size:14px">分隔符/表头沿用「设置 → 导出记录格式」；字段固定为：${HIIT_FIELDS.map(f=>f.label).join('、')}。</p>
+    <pre id="export-text">${escHtml(txt)}</pre>
+    <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
+    ${hiit.sessions.length>0?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="hiitExportLatestToNote()">📝 最近一次导出到笔记</button>`:''}
+  </div>`;
+}
+function hiitExportLatestToNote(){
+  if(hiit.sessions.length===0){ alert('还没有完成的 HIIT 训练'); return; }
+  const s=hiit.sessions[0];
+  const lines=[
+    '总时长：'+fmt(s.duration),
+    '结构：'+s.sets+' 组 × '+s.rounds+' 轮',
+    '运动 '+s.work+' 秒 / 休息 '+s.rest+' 秒'+(s.setRest>0?' / 组间休息 '+s.setRest+' 秒':''),
+  ];
+  const text=`🔥 HIIT 训练记录 · ${s.date} ${s.t||''}`+'\n'+'='.repeat(30)+'\n'+lines.join('\n');
+  notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
+  persistNotes();
+  alert('已导出到笔记 ✔');
+  switchTab('notes');
+}
+function hiitExportToNote(){ hiitExportLatestToNote(); }
+
+/* ============ 爬楼页（连续计时 + 楼层累计 + 休息倒计时 + 结束打卡）============ */
+const STAIR_LS = 'fitness_stair_v2';
+let stair = {
+  tab:'record',
+  running:false, finished:false, elapsed:0, startedAt:0, timerId:null,
+  floors:0, weight:65,
+  laps:[],                // {floors, dur, t}
+  lapStartAt:0, lapFloors:0,
+  restRunning:false, restDone:false, restLeft:30, restTotal:30, restEndAt:0, restTimerId:null,
+  sessions:[],            // {date,t,duration,floors,laps,kcal}
+};
+function loadStair(){ try{ const d=JSON.parse(localStorage.getItem(STAIR_LS)||'{}');
+  if(Array.isArray(d.sessions)) stair.sessions=d.sessions;
+  const w=parseInt(d.weight,10); if(w>20&&w<300) stair.weight=w;
+  const r=parseInt(d.restLeft,10); if(r>0&&r<=3600) stair.restLeft=r;
+  stair.running=false; stair.finished=false; stair.elapsed=0; stair.floors=0;
+  stair.laps=[]; stair.lapStartAt=0; stair.lapFloors=0;
+  stair.restRunning=false; stair.restDone=false; stair.restTimerId=null;
+}catch(e){} }
+function persistStair(){ localStorage.setItem(STAIR_LS, JSON.stringify({sessions:stair.sessions, weight:stair.weight, restLeft:stair.restLeft})); }
+function stairKcal(){ return Math.round(stair.weight * stair.floors * 0.17); }
+
+function setStairTab(t){ stair.tab=t; renderStair(); }
+function setStairWeight(v){ const w=parseInt(v,10); if(w>20&&w<300){ stair.weight=w; persistStair(); renderStair(); } }
+function setStairRest(v){ const r=parseInt(v,10); if(r>0&&r<=3600){ stair.restLeft=r; stair.restTotal=r; persistStair(); } }
+
+function stairStart(){
+  if(stair.running){ stairPause(); return; }
+  if(stair.finished){ stairReset(); }
+  stair.running=true;
+  stair.startedAt = Date.now() - stair.elapsed;
+  if(stair.lapStartAt===0) stair.lapStartAt = stair.elapsed;
+  stair.timerId = setInterval(stairTick, 200);
+  renderStair();
+}
+function stairPause(){
+  if(!stair.running) return;
+  stair.running=false; clearInterval(stair.timerId);
+  stair.elapsed = Date.now() - stair.startedAt;
+  renderStair();
+}
+function stairReset(){
+  stair.running=false; stair.finished=false; clearInterval(stair.timerId);
+  stair.elapsed=0; stair.startedAt=0; stair.floors=0;
+  stair.laps=[]; stair.lapStartAt=0; stair.lapFloors=0;
+  stairCancelRest();
+  renderStair();
+}
+function stairTick(){
+  if(!stair.running) return;
+  stair.elapsed = Date.now() - stair.startedAt;
+  stairPaint();
+}
+function stairPaint(){
+  const t=$('stair-time'); if(t) t.textContent=fmt(stair.elapsed);
+  const f=$('stair-floors'); if(f) f.textContent=stair.floors;
+  const k=$('stair-kcal'); if(k) k.textContent=stairKcal();
+  const s=$('stair-sub'); if(s) s.textContent=`已爬 ${stair.floors} 层 · ${stair.laps.length} 趟 · ${stairKcal()} kcal`;
+}
+function stairAddFloors(n){
+  if(!stair.running) stairStart();   // 第一次加楼层时自动开始计时
+  stair.floors += n;
+  stair.lapFloors += n;
+  stairPaint();
+}
+function stairSetFloors(v){
+  const f=parseInt(v,10); if(isNaN(f)||f<0) return;
+  if(!stair.running && f>0) stairStart();
+  stair.floors = f;
+  stairPaint();
+}
+function stairRecordLap(){
+  if(stair.lapFloors<=0){ alert('这趟还没有爬楼层哦'); return; }
+  const dur = Math.max(0, Math.round((stair.elapsed - stair.lapStartAt)/1000));
+  stair.laps.push({ floors:stair.lapFloors, dur:dur, t:nowTime() });
+  stair.lapStartAt = stair.elapsed;
+  stair.lapFloors = 0;
+  renderStair();
+}
+function stairFinish(){
+  if(stair.lapFloors>0){
+    const dur = Math.max(0, Math.round((stair.elapsed - stair.lapStartAt)/1000));
+    stair.laps.push({ floors:stair.lapFloors, dur:dur, t:nowTime() });
+  }
+  stair.running=false; stair.finished=true; clearInterval(stair.timerId);
+  stair.elapsed = Date.now() - stair.startedAt;
+  stairCancelRest();
+  stair.sessions.unshift({
+    date:today(), t:nowTime(), duration:stair.elapsed,
+    floors:stair.floors, laps:stair.laps.length, kcal:stairKcal(),
+  });
+  persistStair();
+  Native.fire({ restSeconds:0, label:'爬楼完成', at:nowTime(), soundType:6 });
+  renderStair();
+}
+
+/* —— 组间休息倒计时 —— */
+function stairStartRest(sec){
+  stairCancelRest();
+  stair.restTotal=sec; stair.restLeft=sec; stair.restRunning=true; stair.restDone=false;
+  stair.restEndAt = Date.now()+sec*1000;
+  Native.scheduleCountdown(sec, stair.restEndAt);
+  stair.restTimerId=setInterval(stairRestTick, 200);
+  renderStair();
+}
+function stairRestTick(){
+  if(!stair.restRunning) return;
+  stair.restLeft = Math.max(0, Math.round((stair.restEndAt-Date.now())/1000));
+  const el=$('stair-rest'); if(el) el.innerHTML=stairRestBarHtml();
+  if(stair.restLeft>0) return;
+  stair.restRunning=false; clearInterval(stair.restTimerId);
+  stair.restDone=true;
+  Native.cancelCountdown();
+  Native.fire({ restSeconds:stair.restTotal, label:'爬楼休息结束 · 继续爬', at:nowTime(), soundType:5 });
+  const el2=$('stair-rest'); if(el2) el2.innerHTML=stairRestBarHtml();
+}
+function stairCancelRest(){
+  Native.cancelCountdown();
+  stair.restRunning=false; stair.restDone=false; clearInterval(stair.restTimerId);
+}
+function stairRestBarHtml(){
+  if(!stair.restRunning){
+    if(stair.restDone) return `<div class="rest-bar done" id="stair-rest"><span class="rb-time">00:00</span><span class="rb-info"><b>休息结束！</b> 继续爬楼</span></div>`;
+    return `<div class="rest-bar" id="stair-rest" style="display:none"></div>`;
+  }
+  return `<div class="rest-bar" id="stair-rest">
+    <span class="rb-time">${fmt(stair.restLeft*1000)}</span>
+    <span class="rb-info">休息中 · 到点响铃+锁屏提醒 <b>${stair.restLeft}秒</b></span>
+    <button class="btn btn-ghost" onclick="stairCancelRest();renderStair()">跳过</button>
+  </div>`;
+}
+
+function renderStair(){
+  const tab=stair.tab;
+  let html=`<h2>🧗 爬楼</h2>
+    <div class="mode-toggle">
+      <button class="${tab==='record'?'on':''}" onclick="setStairTab('record')">⏱ 训练</button>
+      <button class="${tab==='export'?'on':''}" onclick="setStairTab('export')">📤 导出</button>
+    </div>`;
+  html += tab==='export' ? renderStairExportContent() : renderStairRecordContent();
+  $('app').innerHTML=html;
+}
+function renderStairTimer(){ if(state.tab==='stair') renderStair(); }
+function renderStairRecordContent(){
+  const s=stair;
+  if(s.finished){
+    return `<div class="card" style="text-align:center;padding:28px 16px">
+      <div style="font-size:40px;margin-bottom:8px">🎉</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:14px">爬楼完成！</div>
+      <div style="color:var(--sub);font-size:15px;line-height:2">
+        总时长 <b style="color:var(--txt)">${fmt(s.elapsed)}</b><br>
+        共 <b style="color:var(--acc)">${s.floors}</b> 层 · ${s.laps.length} 趟 · 约 <b style="color:var(--acc2)">${s.kcal||stairKcal()}</b> kcal
+      </div>
+      <div class="btn-row" style="margin-top:18px">
+        <button class="btn btn-primary" onclick="stairExportToNote()">📝 导出到笔记</button>
+        <button class="btn btn-ghost" onclick="stairReset()">🔄 再来一次</button>
+      </div>
+    </div>`;
+  }
+
+  let html=`<div class="card">
+    <div class="time-display" id="stair-time">${fmt(s.elapsed)}</div>
+    <div class="time-sub" id="stair-sub">已爬 ${s.floors} 层 · ${s.laps.length} 趟 · ${stairKcal()} kcal</div>
+    <div class="stair-floors-big" id="stair-floors">${s.floors}</div>
+    <div class="stair-kcal" id="stair-kcal">约 ${stairKcal()} kcal（体重 ${s.weight}kg）</div>
+    <div class="floor-btns">
+      <button onclick="stairAddFloors(1)">+1 层</button>
+      <button onclick="stairAddFloors(5)">+5 层</button>
+      <button onclick="stairAddFloors(10)">+10 层</button>
+    </div>
+    <input class="inline-input" type="number" min="0" placeholder="或手动输入总楼层数" value="${s.floors>0?s.floors:''}" onchange="stairSetFloors(this.value)" style="margin-bottom:10px">
+    <div class="btn-row">
+      <button class="btn ${s.running?'btn-stop':'btn-primary'}" onclick="stairStart()">${s.running?'⏸ 暂停':(s.elapsed>0?'▶ 继续':'▶ 开始计时')}</button>
+      <button class="btn btn-ghost" onclick="stairReset()">↺ 重置</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-ghost" style="padding:12px;font-size:14px" onclick="stairRecordLap()">📍 记一趟</button>
+      <button class="btn btn-ghost" style="padding:12px;font-size:14px" onclick="stairStartRest(${s.restLeft||30})">☕ 休息 ${s.restLeft||30}秒</button>
+      <button class="btn btn-green" style="padding:12px;font-size:14px" onclick="stairFinish()">✓ 结束</button>
+    </div>
+    <div class="dur-set" style="margin-top:10px;justify-content:flex-start">
+      <span style="color:var(--sub);font-size:13px">休息时长</span>
+      <select onchange="setStairRest(this.value)">${[15,20,30,45,60,90,120].map(r=>`<option ${(s.restLeft||30)==r?'selected':''}>${r}</option>`).join('')}</select> 秒
+      <span style="color:var(--sub);font-size:13px;margin-left:10px">体重</span>
+      <select onchange="setStairWeight(this.value)">${[45,50,55,60,65,70,75,80,85,90,95,100].map(w=>`<option ${s.weight==w?'selected':''}>${w}</option>`).join('')}</select> kg
+    </div>
+    ${stairRestBarHtml()}
+  </div>`;
+
+  // 趟次列表
+  if(s.laps.length>0){
+    html+=`<div class="group-hint"><span>本次趟次（${s.laps.length} 趟）</span></div>`;
+    s.laps.forEach((l,i)=>{
+      html+=`<div class="hist-item">
+        <span class="h-time">${l.t}</span>
+        <span class="h-body"><span class="h-tag">第${i+1}趟</span>${l.floors}层 · 用时 ${fmt(l.dur*1000)}</span>
+      </div>`;
+    });
+  }
+
+  // 历史
+  html+=`<div class="section-title">📋 历史记录（最近 ${Math.min(s.sessions.length,20)} 次）</div>`;
+  if(s.sessions.length===0){
+    html+=`<div class="empty">开始计时后，每爬完一段点「+楼层」累计<br>爬完点「结束」自动打卡存档</div>`;
+  } else {
+    s.sessions.slice(0,20).forEach((r,i)=>{
+      html+=`<div class="hist-item">
+        <span class="h-time">${r.t}</span>
+        <span class="h-body"><span class="h-tag">${r.floors}层</span>${fmt(r.duration)} · ${r.laps}趟 · ${r.kcal}kcal</span>
+        <button class="del" onclick="stairDelSession(${i})">×</button>
+      </div>`;
+    });
+  }
+  return html;
+}
+function stairDelSession(i){ stair.sessions.splice(i,1); persistStair(); renderStair(); }
+
+const STAIR_FIELDS = [
+  {k:'date',label:'日期'},{k:'time',label:'时间'},{k:'duration',label:'总时长'},
+  {k:'floors',label:'楼层'},{k:'laps',label:'趟数'},{k:'kcal',label:'消耗(kcal)'}
+];
+function buildStairExport(){
+  const cfg=sanitizeExportCfg(state.exportCfg);
+  const delim=resolveDelim(cfg);
+  const lines=[];
+  if(cfg.header) lines.push(STAIR_FIELDS.map(f=>f.label).join(delim));
+  stair.sessions.forEach(r=>{
+    const row={ date:r.date, time:r.t||'', duration:fmt(r.duration), floors:r.floors, laps:r.laps, kcal:r.kcal };
+    lines.push(STAIR_FIELDS.map(f=>cellEsc(row[f.k],delim)).join(delim));
+  });
+  return lines.length? lines.join('\n') : '（暂无记录）';
+}
+function renderStairExportContent(){
+  const txt=buildStairExport();
+  return `<div class="card">
+    <p style="color:var(--sub);font-size:14px">分隔符/表头沿用「设置 → 导出记录格式」；字段固定为：${STAIR_FIELDS.map(f=>f.label).join('、')}。</p>
+    <pre id="export-text">${escHtml(txt)}</pre>
+    <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
+    ${stair.sessions.length>0?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="stairExportLatestToNote()">📝 最近一次导出到笔记</button>`:''}
+  </div>`;
+}
+function stairExportLatestToNote(){
+  if(stair.sessions.length===0){ alert('还没有完成的爬楼记录'); return; }
+  const r=stair.sessions[0];
+  const lines=[
+    '总时长：'+fmt(r.duration),
+    '总楼层：'+r.floors+' 层',
+    '趟数：'+r.laps+' 趟',
+    '消耗：约 '+r.kcal+' kcal',
+  ];
+  const text=`🧗 爬楼记录 · ${r.date} ${r.t||''}`+'\n'+'='.repeat(30)+'\n'+lines.join('\n');
+  notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
+  persistNotes();
+  alert('已导出到笔记 ✔');
+  switchTab('notes');
+}
+function stairExportToNote(){ stairExportLatestToNote(); }
+
 /* ============ 设置：系统权限检查（为计时器的倒计时提醒服务） ============ */
 function permState(){
   try{
@@ -830,13 +1434,22 @@ function renderSettings(){
           <div class="p-desc">归零时震动提醒，无需申请</div></div>
         ${permBadge(true)}
       </div>
-      <div class="field-label" style="margin-top:14px">闹铃声音 <span style="color:#666;font-size:12px">（选好后点「测试系统提醒」试听）</span></div>
+      <div class="field-label" style="margin-top:14px">闹铃声音 <span style="color:#666;font-size:12px">（15 种铃声，可按场景单独设置）</span></div>
+      <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">统一铃声（点一下应用到所有场景）</div>
       <div class="chips">
-        <span class="chip ${p.sound===0?'on':''}" onclick="setSoundMode(0)">🔔 门铃声（叮咚）</span>
-        <span class="chip ${p.sound===2?'on':''}" onclick="setSoundMode(2)">🔊 滴滴滴滴滴滴</span>
-        <span class="chip ${p.sound===3?'on':''}" onclick="setSoundMode(3)">🚪 敲门声（咚咚咚）</span>
-        <span class="chip ${p.sound===4?'on':''}" onclick="setSoundMode(4)">🎐 风铃声</span>
-        <span class="chip ${p.sound===1?'on':''}" onclick="setSoundMode(1)">🎵 跟随系统闹铃</span>
+        ${SOUND_MODES.map(m=>`<span class="chip" onclick="applySoundToAll(${m.k})">${m.name}</span>`).join('')}
+      </div>
+      <div class="field-label" style="font-size:12px;color:#666;margin-top:14px">按场景设置（每个场景可单独选铃声，点试听验证）</div>
+      <div class="sound-scene-list">
+        ${SOUND_SCENES.map(s=>`
+          <div class="sound-scene-row">
+            <span class="sound-scene-name">${s.name}</span>
+            <select class="sound-scene-select" onchange="setSceneSound(${s.k}, this.value)">
+              ${SOUND_MODES.map(m=>`<option value="${m.k}" ${soundCfg[s.k]===m.k?'selected':''}>${m.name}</option>`).join('')}
+            </select>
+            <button class="btn btn-ghost" style="padding:4px 10px;margin:0" onclick="testSceneSound(${s.k})">试听</button>
+          </div>
+        `).join('')}
       </div>
       <div class="field-label" style="margin-top:14px">导出记录格式 <span style="color:#666;font-size:12px">（字段顺序 + 分隔符；导出页按此生成预览和复制内容）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">字段之间的分隔符</div>
@@ -897,7 +1510,24 @@ function askBattery(){
   alert('浏览器预览无此设置，需安装安卓 App');
 }
 function testReminder(){
-  Native.fire({ restSeconds:3, label:'测试提醒', test:true, at:nowTime() });
+  Native.fire({ restSeconds:3, label:'测试提醒', test:true, at:nowTime(), soundType:soundTestScene });
+}
+function setSceneSound(type, mode){
+  mode = parseInt(mode, 10);
+  soundCfg[type] = mode;
+  try{ if(window.FitnessNative && window.FitnessNative.setSoundForType) window.FitnessNative.setSoundForType(type, mode); }catch(e){}
+}
+function applySoundToAll(mode){
+  for(let t=0; t<=6; t++){
+    soundCfg[t] = mode;
+    try{ if(window.FitnessNative && window.FitnessNative.setSoundForType) window.FitnessNative.setSoundForType(t, mode); }catch(e){}
+  }
+  renderSettings();
+}
+function testSceneSound(type){
+  soundTestScene = type;
+  const sn = SOUND_SCENES.find(s=>s.k===type);
+  Native.fire({ restSeconds:3, label:'测试提醒 · '+(sn?sn.name:''), test:true, at:nowTime(), soundType:type });
 }
 function setSoundMode(m){
   try{ if(window.FitnessNative && window.FitnessNative.setAlarmSound) window.FitnessNative.setAlarmSound(m); }catch(e){}
@@ -1258,7 +1888,7 @@ function closeSidebar(){ $('sidebar').classList.remove('open'); $('backdrop').cl
 function goTab(tab){ closeSidebar(); switchTab(tab); }
 function refreshSidebar(){
   const el=$('sb-stats'); if(!el) return;
-  el.innerHTML=`今日已记 <b>${state.groups.length}</b> 组 · 历史 <b>${state.records.length}</b> 条 · 笔记 <b>${notes.length}</b> 篇`;
+  el.innerHTML=`训练 <b>${state.groups.length}</b> 组 · HIIT <b>${hiit.sessions.length}</b> 次 · 爬楼 <b>${stair.sessions.length}</b> 次 · 历史 <b>${state.records.length}</b> 条 · 笔记 <b>${notes.length}</b> 篇`;
 }
 
 /* ============ 原生桥接（安卓 App 强提醒）============
@@ -1276,6 +1906,7 @@ const Native = {
     if(window.FitnessNative && window.FitnessNative.dismiss) try{ window.FitnessNative.dismiss(); }catch(e){}
   },
   scheduleCountdown(totalSec, endAt){ // 把倒计时交给系统精确闹钟（锁屏/后台也准点）
+    if(totalSec<=0 || endAt<=Date.now()) return; // 0 秒/已过期不调度：避免瞬间触发
     try{ if(window.FitnessNative && window.FitnessNative.scheduleCountdown) window.FitnessNative.scheduleCountdown(totalSec, endAt); }catch(e){}
   },
   cancelCountdown(){                // 暂停/重置/记录完成时取消系统闹钟
@@ -1286,6 +1917,13 @@ const Native = {
   },
   requestBattery(){                 // 跳转「忽略电池优化」授权页
     try{ if(window.FitnessNative && window.FitnessNative.requestBattery) window.FitnessNative.requestBattery(); }catch(e){}
+  },
+  setSoundForType(type, mode){
+    try{ if(window.FitnessNative && window.FitnessNative.setSoundForType) window.FitnessNative.setSoundForType(type, mode); }catch(e){}
+  },
+  getSoundConfig(){
+    try{ if(window.FitnessNative && window.FitnessNative.getSoundConfig) return JSON.parse(window.FitnessNative.getSoundConfig()); }catch(e){}
+    return null;
   },
   fireFinish(restSeconds){          // 倒计时归零：先取消系统闹钟，再直接触发强提醒（前台即时路径）
     this.cancelCountdown();
@@ -1309,6 +1947,8 @@ function switchTab(tab){
   document.body.classList.toggle('notes-mode', tab==='notes');   // 笔记页不显示底部 tab 栏
   if(tab!=='notes') closeNoteSheet();                            // 离开笔记页时收起操作菜单
   if(tab==='train') renderTrain();
+  else if(tab==='hiit') renderHiit();
+  else if(tab==='stair') renderStair();
   else if(tab==='settings') renderSettings();
   else if(tab==='notes') renderNotes();
   refreshSidebar();
@@ -1316,8 +1956,10 @@ function switchTab(tab){
 
 /* ============ 初始化 ============ */
 function init(){
-  load(); loadNotes(); renderTrain(); tick();
+  load(); loadNotes(); loadHiit(); loadStair(); renderTrain(); tick();
   refreshSidebar();
+  const sc = Native.getSoundConfig();
+  if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }
   const verEl=$('app-version');
   if(verEl) verEl.textContent = window.APP_VERSION ? 'v'+window.APP_VERSION : '';
   window.addEventListener('beforeunload', persist);

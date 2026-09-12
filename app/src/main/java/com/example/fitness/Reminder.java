@@ -34,6 +34,7 @@ public final class Reminder {
 
     private static final String PREFS = "fitness_prefs";
     private static final String KEY_SOUND = "alarm_sound_mode";
+    private static final String KEY_SOUND_TYPE = "alarm_sound_type_"; // + type
 
     /** 双通道（前台服务 + 系统闹钟兜底）可能同时到点，30 秒内只提醒一次 */
     private static volatile long sLastFireAt = 0L;
@@ -41,7 +42,8 @@ public final class Reminder {
 
     private Reminder() {}
 
-    /** 铃声模式：0=内置门铃声（叮咚，默认），1=跟随系统闹铃音，2=滴滴滴滴滴滴，3=敲门声（咚咚咚），4=风铃声 */
+    /** 铃声模式：0=内置门铃声（叮咚，默认），1=跟随系统闹铃音，2=滴滴滴滴滴滴，3=敲门声（咚咚咚），4=风铃声，
+     *  5=喇叭号角，6=鼓点，7=锣声，8=钢琴音，9=心跳，10=哨声，11=电子提示音，12=钟声，13=鸟鸣，14=蜂鸣器 */
     public static int soundMode(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SOUND, 0);
     }
@@ -50,12 +52,28 @@ public final class Reminder {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SOUND, mode).apply();
     }
 
+    /** 按场景查询铃声模式：type=0 训练倒计时结束，1 HIIT运动结束，2 HIIT休息结束，3 HIIT组间休息结束，
+     *  4 HIIT完成，5 爬楼休息结束，6 爬楼完成。未设置时回退到全局 soundMode。 */
+    public static int soundForType(Context ctx, int type) {
+        if (type <= 0) return soundMode(ctx);
+        int v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SOUND_TYPE + type, -1);
+        return v >= 0 ? v : soundMode(ctx);
+    }
+
+    public static void setSoundForType(Context ctx, int type, int mode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SOUND_TYPE + type, mode).apply();
+    }
+
     /** 新一轮倒计时开始时调用，清除上一轮的去重标记 */
     public static void resetDedup() {
         sLastFireAt = 0L;
     }
 
     public static void fire(Context ctx, int restSeconds, boolean isTest) {
+        fire(ctx, restSeconds, isTest, 0);
+    }
+
+    public static void fire(Context ctx, int restSeconds, boolean isTest, int soundType) {
         long now = System.currentTimeMillis();
         if (!isTest && now - sLastFireAt < DEDUP_MS) {
             Log.i(TAG, "skip duplicate fire");
@@ -63,7 +81,7 @@ public final class Reminder {
         }
         sLastFireAt = now;
         ensureChannel(ctx);
-        startAlarmSound(ctx);
+        startAlarmSound(ctx, soundType);
         showLockScreen(ctx, restSeconds, isTest);
         startVibrate(ctx);
         acquireWakeLock(ctx);
@@ -115,8 +133,8 @@ public final class Reminder {
         try { ctx.startActivity(alarm); } catch (Throwable ignored) {}
     }
 
-    /* ==================== 闹铃音：内置铃声（门铃/滴滴/敲门/风铃）或跟随系统闹铃音，不依赖通知权限 ==================== */
-    private static void startAlarmSound(Context ctx) {
+    /* ==================== 闹铃音：内置铃声（14种）或跟随系统闹铃音，不依赖通知权限 ==================== */
+    private static void startAlarmSound(Context ctx, int soundType) {
         try {
             stopAlarmSound();
             MediaPlayer p = new MediaPlayer();
@@ -124,7 +142,7 @@ public final class Reminder {
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build());
-            int mode = soundMode(ctx);
+            int mode = soundForType(ctx, soundType);
             if (mode == 1) {
                 // 跟随系统闹铃音
                 Uri uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
@@ -134,12 +152,22 @@ public final class Reminder {
                 p.setDataSource(ctx, uri);
                 p.prepare();
             } else {
-                // 内置铃声：0=门铃（叮咚） 2=滴滴滴滴滴滴 3=敲门声（咚咚咚） 4=风铃声
+                // 内置铃声：0=门铃 2=滴滴 3=敲门 4=风铃 5=喇叭 6=鼓点 7=锣 8=钢琴 9=心跳 10=哨 11=电子 12=钟声 13=鸟鸣 14=蜂鸣
                 int resId;
                 switch (mode) {
-                    case 2: resId = R.raw.beep_tone; break;
-                    case 3: resId = R.raw.knock_tone; break;
-                    case 4: resId = R.raw.chime_tone; break;
+                    case 2:  resId = R.raw.beep_tone;        break;
+                    case 3:  resId = R.raw.knock_tone;       break;
+                    case 4:  resId = R.raw.chime_tone;       break;
+                    case 5:  resId = R.raw.horn_tone;        break;
+                    case 6:  resId = R.raw.drum_tone;        break;
+                    case 7:  resId = R.raw.gong_tone;        break;
+                    case 8:  resId = R.raw.piano_tone;       break;
+                    case 9:  resId = R.raw.heartbeat_tone;   break;
+                    case 10: resId = R.raw.whistle_tone;     break;
+                    case 11: resId = R.raw.electronic_tone;  break;
+                    case 12: resId = R.raw.bell_tower_tone;  break;
+                    case 13: resId = R.raw.bird_tone;        break;
+                    case 14: resId = R.raw.buzzer_tone;      break;
                     default: resId = R.raw.alarm_tone;
                 }
                 android.content.res.AssetFileDescriptor afd =
