@@ -40,8 +40,9 @@ public class FitnessNativeBridge {
     public void fire(String json) {
         final int restSeconds = parseRest(json);
         final boolean isTest = parseTest(json);
+        final int soundType = parseSoundType(json);
         runOnUi(() -> {
-            Reminder.fire(app, restSeconds, isTest); // 强提醒（弹窗 + 声音 + 震动 + 唤醒）
+            Reminder.fire(app, restSeconds, isTest, soundType); // 强提醒（弹窗 + 声音 + 震动 + 唤醒）
             tryStartOverlay();                       // 可选：悬浮窗
         });
     }
@@ -67,6 +68,24 @@ public class FitnessNativeBridge {
     @JavascriptInterface
     public void setAlarmSound(int mode) {
         Reminder.setSoundMode(app, mode);
+    }
+
+    /** 按场景设置铃声：type=0 训练倒计时，1 HIIT运动结束，2 HIIT休息结束，3 HIIT组间休息，4 HIIT完成，5 爬楼休息结束，6 爬楼完成 */
+    @JavascriptInterface
+    public void setSoundForType(int type, int mode) {
+        Reminder.setSoundForType(app, type, mode);
+    }
+
+    /** 返回所有场景的铃声配置 JSON：{"0":0,"1":2,...}，未单独设置的场景返回全局 soundMode */
+    @JavascriptInterface
+    public String getSoundConfig() {
+        try {
+            JSONObject o = new JSONObject();
+            for (int t = 0; t <= 6; t++) {
+                o.put(String.valueOf(t), Reminder.soundForType(app, t));
+            }
+            return o.toString();
+        } catch (Throwable t) { return "{}"; }
     }
 
     /** 跳转「精确闹钟」授权页（Android 12+ 生效） */
@@ -163,6 +182,11 @@ public class FitnessNativeBridge {
     private boolean parseTest(String json) {
         try { if (json != null && !json.isEmpty()) return new JSONObject(json).optBoolean("test", false); } catch (Throwable ignored) {}
         return false;
+    }
+
+    private int parseSoundType(String json) {
+        try { if (json != null && !json.isEmpty()) return new JSONObject(json).optInt("soundType", 0); } catch (Throwable ignored) {}
+        return 0;
     }
 
     private void runOnUi(Runnable r) { new Handler(Looper.getMainLooper()).post(r); }
