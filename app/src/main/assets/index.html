@@ -440,7 +440,7 @@ function addGroup(extra){
 }
 function lap(){
   const cur = getCurrent();
-  if(state.mode==='countup' && !state.running && cur===0){ startTimer(); return; }  // 正计时未开始→先启动
+  // 记录动作绝不启动计时器：正计时停着/未开始就只记录当前值，状态保持不动
   if(state.mode==='countdown' && cur===0){
     // 倒计时未开始：不自动启动，只把当前倒计时时长记进这一组
     addGroup({ split: state.cdTotal*1000, rest: state.cdTotal });
