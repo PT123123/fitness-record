@@ -189,6 +189,8 @@
     background:var(--card); border-top:1px solid var(--line); border-radius:14px 14px 0 0;
     padding:8px 12px calc(8px + env(safe-area-inset-bottom)); z-index:45; }
   .nc-toolbar{ display:flex; gap:6px; margin-bottom:6px; }
+  .nc-parts{ display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .nc-parts .nc-parts-label{ font-size:12px; color:var(--sub); flex:none; }
   .nc-sym{ flex:none; width:38px; padding:5px 0; background:var(--card2); color:var(--acc);
     border:1px solid var(--line); border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
   .nc-sym.tag{ background:rgba(79,195,247,.16); border-color:var(--acc); }
@@ -1671,10 +1673,41 @@ const noteSelSet = new Set();
 let noteSuggestTags = [];  // 标签联想候选 [[tag,count],...]
 let noteSuggestIdx = -1;
 let noteSheetId = null;    // 当前操作菜单对应的笔记 id
+let noteEditing = false;   // 笔记详情是否处于编辑模式（默认「查看」只读）
 
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function loadNotes(){ try{ const d=JSON.parse(localStorage.getItem(NOTES_LS)||'[]'); if(Array.isArray(d)) notes=d; }catch(e){} }
-function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); }
+function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); syncHeatmap(); }
+
+/* —— 健身日记部位标签：#健身日记/部位（热力图数据源） —— */
+const HM_TAG_PREFIX = '健身日记/';
+const HM_ALL_PARTS = ['胸','背','腿','肩','腹'];
+function noteParts(n){ return extractTags(n.content).filter(t=>t.startsWith(HM_TAG_PREFIX)).map(t=>t.slice(HM_TAG_PREFIX.length)).filter(p=>HM_ALL_PARTS.includes(p)); }
+
+/* 历史数据迁移：把旧的训练记录（每条有日期+部位）转成 #健身日记/部位 笔记，保证热力图历史不丢。
+   幂等：只执行一次；若笔记里已出现任何 #健身日记/ 标签则跳过（说明用户已手动使用）。 */
+const NOTES_MIGRATED_LS = 'fitness_notes_migrated_v1';
+function migrateRecordsToNotes(){
+  try{
+    if(localStorage.getItem(NOTES_MIGRATED_LS)==='1') return;
+    localStorage.setItem(NOTES_MIGRATED_LS,'1');       // 先标记，防止迁移中断导致重复
+    if(notes.some(n=>extractTags(n.content).some(t=>t.startsWith(HM_TAG_PREFIX)))) return;
+    const byDay={};
+    state.records.forEach(r=>{
+      if(!r || !r.date || !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || !r.part) return;
+      if(!HM_ALL_PARTS.includes(r.part)) return;
+      (byDay[r.date] || (byDay[r.date]=new Set())).add(r.part);
+    });
+    const days=Object.keys(byDay).sort();
+    if(!days.length) return;
+    days.forEach(date=>{
+      const tags=[...byDay[date]].sort().map(p=>'#'+HM_TAG_PREFIX+p).join(' ');
+      const t=new Date(date+'T12:00:00').getTime();
+      notes.unshift({ id:uid(), content:tags, pinned:false, createdAt:t, updatedAt:t });
+    });
+    persistNotes();
+  }catch(e){}
+}
 function noteTitle(n){ const line=(n.content||'').split('\n').find(x=>x.trim()); return line? line.trim() : '无标题'; }
 function notePreview(n){ const lines=(n.content||'').split('\n').map(x=>x.trim()).filter(Boolean); return lines.slice(1).join(' '); }
 function fmtNoteTime(ts){ if(!ts) return ''; const d=new Date(ts); const diff=Date.now()-ts;
@@ -1778,6 +1811,12 @@ function composerHtml(){
       <button class="nc-sym" onclick="insertNoteSymbol('-')">-</button>
       <button class="nc-sym" onclick="insertNoteSymbol('+')">+</button>
     </div>
+    <div class="nc-parts">
+      <span class="nc-parts-label">#健身日记/</span>
+      <button class="nc-sym" onclick="insertPartTag('胸')">胸</button>
+      <button class="nc-sym" onclick="insertPartTag('背')">背</button>
+      <button class="nc-sym" onclick="insertPartTag('腿')">腿</button>
+    </div>
     <div class="nc-wrap">
       <div class="tag-suggest" id="note-suggest" style="display:none"></div>
       <div class="nc-row">
@@ -1853,6 +1892,19 @@ function insertNoteSymbol(sym){
   try{ ta.setSelectionRange(pos,pos); }catch(err){}
   if(sym==='#') updateTagSuggest();
 }
+
+/* 快捷插入 #健身日记/部位 标签（底部输入区工具栏） */
+function insertPartTag(p){
+  const ta=document.getElementById('note-composer');
+  if(!ta) return;
+  const s=ta.selectionStart!=null?ta.selectionStart:ta.value.length;
+  const e=ta.selectionEnd!=null?ta.selectionEnd:ta.value.length;
+  const ins='#'+HM_TAG_PREFIX+p+' ';
+  ta.value=ta.value.slice(0,s)+ins+ta.value.slice(e);
+  noteDraft=ta.value; autoGrow(ta); ta.focus();
+  try{ ta.setSelectionRange(s+ins.length, s+ins.length); }catch(err){}
+  updateTagSuggest();
+}
 function sendNote(){
   const text=(noteDraft||'').trim();
   if(!text){ const ta=$('note-composer'); if(ta) ta.focus(); return; }
@@ -1918,7 +1970,7 @@ function openNoteSheet(id){
       ${ts.length?`<div class="as-tags">${ts.map(t=>`<span class="as-tag" onclick="sheetFilterTag('${escHtml(t)}')">#${escHtml(t)}</span>`).join('')}</div>`:''}
     </div>
     <div class="as-actions">
-      <button class="btn btn-primary" onclick="closeNoteSheet();openNoteDetail('${n.id}')">✏️ 查看 / 编辑</button>
+      <button class="btn btn-primary" onclick="closeNoteSheet();openNoteDetail('${n.id}')">👁 查看</button>
       <button class="btn btn-ghost" onclick="sheetCopy('${n.id}')">📋 复制</button>
       <button class="btn btn-ghost" onclick="sheetPin('${n.id}')">${n.pinned?'📌 取消置顶':'📌 置顶'}</button>
       <button class="btn btn-stop" onclick="sheetDelete('${n.id}')">🗑 删除</button>
@@ -1937,8 +1989,9 @@ function sheetCopy(id){ closeNoteSheet(); copyNote(id); }
 function sheetFilterTag(t){ closeNoteSheet(); noteTagFilter=t; noteQuery=''; renderNotes(); }
 
 /* —— 笔记详情：可编辑内容，删除/复制/置顶在这里（输入框不含这些） —— */
-function openNoteDetail(id){ noteDetailId=id; renderNotes(); }
-function backFromNote(){ noteDetailId=null; renderNotes(); }
+function openNoteDetail(id){ noteDetailId=id; noteEditing=false; renderNotes(); }   // 先进「查看」，默认只读
+function toggleNoteEdit(){ noteEditing=!noteEditing; renderNotes(); }
+function backFromNote(){ noteDetailId=null; noteEditing=false; renderNotes(); }
 function updateNoteContent(id, v){ const n=notes.find(x=>x.id===id); if(!n) return; n.content=v; n.updatedAt=Date.now(); persistNotes(); }
 function toggleNotePin(id){ const n=notes.find(x=>x.id===id); if(!n) return; n.pinned=!n.pinned; n.updatedAt=Date.now(); persistNotes(); renderNotes(); }
 function deleteNote(id){
@@ -1970,22 +2023,47 @@ function copyNote(id){
 function renderNoteDetail(id){
   const n=notes.find(x=>x.id===id); if(!n){ noteDetailId=null; renderNotes(); return; }
   const t=noteTitle(n), ts=extractTags(n.content);
+  const readonly = noteEditing?'':' readonly';
   let html=`<div class="rec-head" style="margin-bottom:8px">
     <span class="rh-title">📝 笔记详情 <span style="color:var(--sub);font-weight:400;font-size:12px">${escHtml(t)}</span></span>
     <button class="rh-close" onclick="backFromNote()">返回 ✕</button>
   </div>
-  ${ts.length?`<div class="ntags" style="padding:0 2px 10px">${ts.map(x=>`<span class="ntag">#${escHtml(x)}</span>`).join('')}</div>`:''}
+  <div class="ntags" id="detail-tags" style="padding:0 2px 10px">${ts.map(x=>`<span class="ntag">#${escHtml(x)}</span>`).join('')}</div>
   <div class="card" style="padding:10px">
-    <textarea id="note-editor" class="inline-input" style="min-height:50vh;resize:none;line-height:1.7;font-size:15px" placeholder="编辑这条笔记…（自动保存，输入 # 可加标签）" oninput="updateNoteContent('${n.id}', this.value)">${escHtml(n.content)}</textarea>
+    ${noteEditing?`<div class="nc-parts" style="margin-bottom:8px">
+      <span class="nc-parts-label">#健身日记/</span>
+      <button class="nc-sym" onclick="insertPartTagInEditor('胸')">胸</button>
+      <button class="nc-sym" onclick="insertPartTagInEditor('背')">背</button>
+      <button class="nc-sym" onclick="insertPartTagInEditor('腿')">腿</button>
+    </div>`:''}
+    <textarea id="note-editor" class="inline-input"${readonly} style="min-height:50vh;resize:none;line-height:1.7;font-size:15px" placeholder="${noteEditing?'编辑这条笔记…（自动保存，输入 # 可加标签）':'（只读）点击「✏️ 编辑」可修改'}" oninput="updateNoteContent('${n.id}', this.value)">${escHtml(n.content)}</textarea>
   </div>
   <div class="note-actions">
+    ${noteEditing
+      ? `<button class="btn btn-green" onclick="toggleNoteEdit()">✔ 完成</button>`
+      : `<button class="btn btn-primary" onclick="toggleNoteEdit()">✏️ 编辑</button>`}
     <button class="btn btn-ghost" onclick="copyNote('${n.id}')">📋 复制</button>
     <button class="btn btn-ghost" onclick="toggleNotePin('${n.id}')">${n.pinned?'📌 取消置顶':'📌 置顶'}</button>
     <button class="btn btn-stop" onclick="deleteNote('${n.id}')">🗑 删除</button>
   </div>`;
   $('app').innerHTML=html;
   const ta=$('note-editor');
-  if(ta){ ta.focus(); const len=ta.value.length; try{ ta.setSelectionRange(len,len); }catch(e){} }
+  if(ta && noteEditing){ ta.focus(); const len=ta.value.length; try{ ta.setSelectionRange(len,len); }catch(e){} }
+}
+
+/* 详情编辑模式下快捷插入 #健身日记/部位 并实时保存 */
+function insertPartTagInEditor(p){
+  const ta=$('note-editor'); if(!ta || !noteEditing) return;
+  const s=ta.selectionStart!=null?ta.selectionStart:ta.value.length;
+  const e=ta.selectionEnd!=null?ta.selectionEnd:ta.value.length;
+  const ins='#'+HM_TAG_PREFIX+p+' ';
+  ta.value=ta.value.slice(0,s)+ins+ta.value.slice(e);
+  const n=notes.find(x=>x.id===noteDetailId); if(!n) return;
+  updateNoteContent(noteDetailId, ta.value);
+  const tagsEl=$('detail-tags');
+  if(tagsEl) tagsEl.innerHTML=extractTags(n.content).map(x=>`<span class="ntag">#${escHtml(x)}</span>`).join('');
+  try{ ta.setSelectionRange(s+ins.length, s+ins.length); }catch(err){}
+  ta.focus();
 }
 
 /* ============ 侧边栏 ============ */
@@ -2006,13 +2084,17 @@ let lastHmSync = '';            // 最近一次已同步给原生的映射串（
 function hmKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function hmDaysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
 
-/* 从历史记录汇总：日期 -> {部位:组数}（用于界面渲染与同步原生） */
+/* 从健身笔记的 #健身日记/部位 标签汇总：日期 -> {部位:次数}（热力图数据源，与桌面控件同步） */
 function buildDayMap(){
   const map = {};
-  state.records.forEach(r=>{
-    if(!r || !r.date || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) return;
-    const m = map[r.date] || (map[r.date] = {});
-    if(r.part) m[r.part] = (m[r.part]||0)+1;
+  notes.forEach(n=>{
+    if(!n || !n.createdAt) return;
+    const parts=noteParts(n);
+    if(!parts.length) return;
+    const d=new Date(n.createdAt);
+    const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const m = map[key] || (map[key] = {});
+    parts.forEach(p=>{ m[p]=(m[p]||0)+1; });
   });
   return map;
 }
@@ -2087,7 +2169,7 @@ function renderHeatmap(){
       <div class="hm-stat"><b style="color:#ffa726">${legs}</b><span>腿</span></div>
     </div>
     ${streak? `<div class="hm-streak">🔥 连续打卡 ${streak} 天</div>` : ''}
-    <div style="margin-top:12px;color:var(--sub);font-size:12px">点击任意日期可查看当天记录 · 未练为灰格，只练肩/腹为青灰格</div>
+    <div style="margin-top:12px;color:var(--sub);font-size:12px">点击任意日期查看当天健身笔记 · 数据来自笔记中的 #健身日记/部位 标签 · 未练为灰格，只练肩/腹为青灰格</div>
   </div>`;
   $('app').innerHTML=html;
 }
@@ -2114,13 +2196,22 @@ function hmCells(y,m,dayMap,isCur,todayKey){
   return s;
 }
 
-/* 点击某天：弹层展示当天记录 */
+/* 点击某天：弹层展示当天的健身笔记（带 #健身日记/部位 标签） */
 function hmShowDay(date){
-  const recs=state.records.filter(r=>r.date===date).slice().sort((a,b)=>(a.t||'').localeCompare(b.t||''));
-  if(!recs.length){ alert('这一天没有训练记录'); return; }
-  const lines=recs.map(r=>`<div class="hist-item"><span class="h-time">${r.t||''}</span><span class="h-body">${escHtml(fmtRecordLine(r))}</span></div>`).join('');
+  const dayNotes=notes.filter(n=>{
+    if(!n || !n.createdAt) return false;
+    const d=new Date(n.createdAt);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')===date;
+  }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  if(!dayNotes.length){ alert('这一天没有健身笔记'); return; }
+  const lines=dayNotes.map(n=>{
+    const dots=noteParts(n).map(p=>`<span class="hm-dot-s" style="background:${HM_COLORS[p]||'#888'}"></span>`).join('');
+    return `<div class="hist-item" style="cursor:pointer" onclick="closeNoteSheet();openNoteDetail('${n.id}')">
+      <span class="h-body">${escHtml(noteTitle(n))}</span><span style="margin-left:6px">${dots}</span>
+    </div>`;
+  }).join('');
   const el=$('action-sheet');
-  el.innerHTML=`<div class="as-head"><div class="as-title">📅 ${date} · ${recs.length} 条记录</div></div><div style="max-height:60vh;overflow-y:auto">${lines}</div><button class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="closeNoteSheet()">关闭</button>`;
+  el.innerHTML=`<div class="as-head"><div class="as-title">📅 ${date} · ${dayNotes.length} 篇健身笔记</div></div><div style="max-height:60vh;overflow-y:auto">${lines}</div><button class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="closeNoteSheet()">关闭</button>`;
   el.classList.add('show'); $('sheet-mask').classList.add('show');
 }
 
@@ -2193,7 +2284,7 @@ function switchTab(tab){
 
 /* ============ 初始化 ============ */
 function init(){
-  load(); loadNotes(); loadHiit(); loadStair(); syncHeatmap(); renderTrain(); tick();
+  load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
   refreshSidebar();
   const sc = Native.getSoundConfig();
   if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }
