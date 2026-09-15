@@ -83,6 +83,20 @@
     background:rgba(79,195,247,.08); color:var(--acc); border-radius:12px; font-size:17px; font-weight:700; }
 
   .dur-set{ display:flex; align-items:center; gap:10px; justify-content:center; margin:8px 0 14px; }
+
+  /* 完成记录后自动休息倒计时开关 */
+  .switch-row{ display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--card2); border-radius:10px; padding:10px 12px; margin:0 0 12px; }
+  .switch-row .sr-label{ font-size:14px; color:var(--txt); }
+  .switch-row .sr-sub{ font-size:12px; color:var(--sub); margin-top:1px; }
+  .switch{ position:relative; display:inline-block; width:46px; height:26px; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .slider{ position:absolute; inset:0; background:var(--chip); border-radius:13px;
+    transition:.2s; cursor:pointer; }
+  .switch .slider::before{ content:''; position:absolute; width:20px; height:20px; left:3px; top:3px;
+    background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider{ background:var(--acc); }
+  .switch input:checked + .slider::before{ transform:translateX(20px); }
   .dur-set select{ background:var(--card2); color:var(--txt); border:1px solid var(--line);
     border-radius:8px; padding:8px 10px; font-size:15px; }
 
@@ -308,11 +322,37 @@ function fmtRecordLine(r){
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 function today(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function nowTime(){ const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+/* 把 HH:MM 解析成今天的时间戳（兼容旧记录没有 ts 的情况） */
+function parseHMToTs(t){
+  if(!t) return 0;
+  const m=String(t).match(/(\d{1,2}):(\d{2})/);
+  if(!m) return 0;
+  const d=new Date(); d.setHours(parseInt(m[1],10), parseInt(m[2],10), 0, 0);
+  return d.getTime();
+}
+function fmtT(ts){ if(!ts) return ''; const d=new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+/* 备注记忆推荐：统计历史备注（记录历史 + 本次组别），按使用次数取前 N 项 */
+function noteSuggestionList(limit){
+  limit = limit||8;
+  const map={};
+  state.records.forEach(r=>{ if(r && r.note && String(r.note).trim()){ const k=String(r.note).trim(); map[k]=(map[k]||0)+1; } });
+  state.groups.forEach(g=>{ if(g && g.note && String(g.note).trim()){ const k=String(g.note).trim(); map[k]=(map[k]||0)+1; } });
+  return Object.keys(map).sort((a,b)=> map[b]-map[a] || a.localeCompare(b,'zh')).slice(0,limit);
+}
+/* 把备注安全编码进 onclick 里的 JS 字符串（避免引号/换行破坏结构） */
+function pickNoteSuggEnc(s){ return encodeURIComponent(s).replace(/'/g,'%27'); }
+/* 备注推荐 chips：排除当前值，最多 8 项；onclickFn(s) 返回点击后的 JS 代码 */
+function noteSuggestChips(curValue, onclickFn){
+  const sugg=noteSuggestionList(8).filter(s=>s!==String(curValue||''));
+  if(!sugg.length) return '';
+  return `<div class="chips" style="margin-top:8px">` + sugg.map(s=>`<span class="chip" onclick="${onclickFn(s)}">${escHtml(s)}</span>`).join('') + `</div>`;
+}
 
 /* ============ 状态 ============ */
 let state = {
   tab:'train',
   trainSub:'timer',
+  autoRest:false,       // 完成一组记录后自动开始休息倒计时
   mode:'countup',
   running:false,
   elapsed:0,
@@ -320,7 +360,7 @@ let state = {
   cdLeft:180,
   startedAt:0,
   lastLapAt:0,
-  groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t}
+  groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t,ts}
   editingIdx:null,
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
   exportCfg: { order:['date','time','set','part','action','reps','weight','rest','note'], off:[], delim:'comma', header:true }, // 导出记录格式：字段顺序 + 分隔符
@@ -335,13 +375,14 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
+  if(d.autoRest!=null) state.autoRest=!!d.autoRest;
   if(d.exportCfg) state.exportCfg=sanitizeExportCfg(d.exportCfg);
   // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, exportCfg:state.exportCfg})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg})); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -428,7 +469,7 @@ function addGroup(extra){
     idx: state.groups.length+1, cumul:cur, split:split,
     part:groupDefaults.part, action:groupDefaults.action,
     reps:groupDefaults.reps, weight:groupDefaults.weight,
-    note:'', rest: Math.round(split/1000), t: nowTime(), done:false
+    note:'', rest: Math.round(split/1000), t: nowTime(), ts: Date.now(), done:false
   }, extra||{});
   if(g.rest==null) g.rest=Math.round((g.split||0)/1000);
   if(g.rest<0) g.rest=0;
@@ -474,7 +515,20 @@ function updateGroup(idx, patch){ Object.assign(state.groups[idx], patch);
   ['part','action','reps','weight'].forEach(k=>{ if(patch[k]!==undefined) groupDefaults[k]=patch[k]; });
   persist(); renderTimer(); }
 function toggleEdit(i){ state.editingIdx = state.editingIdx===i? null : i; renderTimer(); }
-function closeEdit(){ state.editingIdx=null; renderTimer(); }
+function closeEdit(){
+  const gi = state.editingIdx;
+  const g = (gi!=null && state.groups[gi]) ? state.groups[gi] : null;
+  state.editingIdx=null;
+  renderTimer();
+  // 开关开启时：完成一组记录后，按该组休息时间自动开始倒计时
+  if(state.autoRest && g && (parseInt(g.rest,10)||0) > 0){
+    state.cdTotal = parseInt(g.rest,10);
+    state.cdLeft = state.cdTotal;
+    setMode('countdown');
+    startTimer();
+  }
+}
+function setAutoRest(on){ state.autoRest=!!on; persist(); renderTimer(); }
 function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
 function pickAction(i,a){ updateGroup(i,{action:a}); }
 function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
@@ -517,6 +571,7 @@ function restoreFocus(){
 function renderGroupEdit(i){
   const g=state.groups[i];
   const fid=id=> `data-fid="g-${i}-${id}"`;
+  const noteSuggHtml = noteSuggestChips(g.note, s=>`updateGroup(${i},{note:decodeURIComponent('${pickNoteSuggEnc(s)}')})`);
   return `<div class="group-edit">
     <div class="field-label">部位</div>
     <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
@@ -534,6 +589,7 @@ function renderGroupEdit(i){
     <div class="chips" style="margin-top:8px">${REST_OPTIONS.slice(0,7).map(r=>`<span class="chip ${g.rest==r?'on':''}" onclick="updateGroup(${i},{rest:${r}})">${r}秒</span>`).join('')}</div>
     <div class="field-label">笔记（如：好酸 / 状态不错）</div>
     <input class="inline-input" ${fid('note')} placeholder="可选" value="${g.note||''}" oninput="updateGroup(${i},{note:this.value})">
+    ${noteSuggHtml}
     <div class="edit-actions">
       <button class="btn btn-green" onclick="closeEdit()">✔ 完成</button>
       <button class="btn btn-ghost" onclick="removeGroup(${i})">删除这组</button>
@@ -546,12 +602,15 @@ function setTrainSub(sub){ state.trainSub=sub; renderTrain(); }
 function renderTrain(){
   captureFocus();
   const sub=state.trainSub;
-  let html=`<h2>🏋️ 训练</h2>
-    <div class="mode-toggle">
-      <button class="${sub==='timer'?'on':''}" onclick="setTrainSub('timer')">⏱ 计时器</button>
-      <button class="${sub==='export'?'on':''}" onclick="setTrainSub('export')">📤 导出</button>
+  let html=`<h2>🏋️ 训练</h2>`;
+  if(sub==='export'){
+    html+=`<div class="btn-row" style="margin-bottom:6px">
+      <button class="btn btn-ghost" onclick="setTrainSub('timer')">← 返回计时器</button>
     </div>`;
-  html += sub==='export' ? renderExportContent() : renderTimerContent();
+    html += renderExportContent();
+  } else {
+    html += renderTimerContent();
+  }
   $('app').innerHTML=html;
   restoreFocus();
 }
@@ -562,6 +621,11 @@ function renderTimerContent(){
   html+=`<div class="mode-toggle">
     <button class="${s.mode==='countup'?'on':''}" onclick="setMode('countup')">▶ 正计时（训练）</button>
     <button class="${s.mode==='countdown'?'on':''}" onclick="setMode('countdown')">⏳ 倒计时（休息）</button>
+  </div>`;
+  html+=`<div class="switch-row">
+    <div><div class="sr-label">完成记录后自动开始休息倒计时</div>
+    <div class="sr-sub">每组点「✔ 完成」后，按该组休息时间自动开始倒计时</div></div>
+    <label class="switch"><input type="checkbox" ${s.autoRest?'checked':''} onchange="setAutoRest(this.checked)"><span class="slider"></span></label>
   </div>`;
 
   if(s.mode==='countdown'){
@@ -626,6 +690,7 @@ function renderTimerContent(){
   }
 
   html += renderRecordSection();
+  html+=`<button class="btn btn-ghost" style="width:100%;margin-top:4px" onclick="setTrainSub('export')">📤 导出记录</button>`;
   return html;
 }
 
@@ -643,6 +708,7 @@ function updateRecPreview(){ const prev=$('rec-preview'); if(prev) prev.textCont
 
 function renderRecordSection(){
   const d=recDraft;
+  const mNoteSuggHtml = noteSuggestChips(d.note, s=>`recDraft.note=decodeURIComponent('${pickNoteSuggEnc(s)}');renderTimer()`);
   let html=`<div class="section-title">📝 记录（手动补录 + 历史，与计时器同一份）</div>`;
 
   if(showManual){
@@ -671,6 +737,7 @@ function renderRecordSection(){
       </div>
       <div class="field-label">笔记</div>
       <input class="inline-input" placeholder="好酸" value="${d.note||''}" oninput="recDraft.note=this.value;updateRecPreview()">
+      ${mNoteSuggHtml}
       <div class="preview" id="rec-preview">${recPreviewText()}</div>
       <button class="btn btn-green" style="width:100%" onclick="addManual()">＋ 加入记录</button>
     </div>`;
@@ -823,10 +890,16 @@ function renderExportContent(){
 function exportToNoteAndReset(){
   if(state.groups.length===0){ alert('计时器里还没有记任何组，先点「＋ 记一组」吧'); return; }
   if(!confirm('确认把本次训练导出到笔记，并重置计时器？\n导出后计时器与本次组别将被清空。')) return;
+  const gs = state.groups;
+  const firstTs = gs[0].ts || parseHMToTs(gs[0].t);
+  const lastTs  = gs[gs.length-1].ts || parseHMToTs(gs[gs.length-1].t);
+  const durMs = (firstTs && lastTs && lastTs>=firstTs) ? lastTs-firstTs : 0;
   const lines=[];
-  lines.push('训练时长：' + fmt(state.elapsed));
-  lines.push('组数：' + state.groups.length + ' 组');
-  state.groups.forEach((g,i)=>{
+  lines.push('开始记录：' + fmtT(firstTs));
+  lines.push('最后一组：' + fmtT(lastTs));
+  lines.push('训练时长：' + fmt(durMs));
+  lines.push('组数：' + gs.length + ' 组');
+  gs.forEach((g,i)=>{
     if(g.part || g.action || g.reps || g.weight || g.note){
       lines.push((i+1) + '. ' + fmtRecordLine({
         part:g.part, action:g.action, reps:g.reps, weight:g.weight,
@@ -836,7 +909,9 @@ function exportToNoteAndReset(){
       lines.push((i+1) + '. 第' + (i+1) + '组 · ' + (g.t||'') + ' · +' + fmt(g.split));
     }
   });
-  const text = `🏋️ 训练记录 · ${today()} ${nowTime()}` + '\n' + '='.repeat(30) + '\n' + lines.join('\n');
+  const parts = [...new Set(gs.map(g=>g.part).filter(Boolean))];
+  const tags = parts.length ? parts.map(p=>`#健身日记/${p}`).join(' ') : '';
+  const text = `🏋️ 训练记录 · ${today()}` + (tags? '\n'+tags : '') + '\n' + '='.repeat(30) + '\n' + lines.join('\n');
   notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
   persistNotes();
   Native.cancelCountdown();
