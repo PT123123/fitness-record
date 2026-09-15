@@ -63,5 +63,22 @@
                 android:value="健身休息倒计时期间保持进程存活，确保锁屏/后台到点准时提醒" />
         </service>
 
+        <!-- 桌面 2x2 训练热力图控件：按月历显示哪天练了什么（数据由 App 内记录变更时同步） -->
+        <receiver
+            android:name=".HeatmapWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/heatmap_widget_info" />
+        </receiver>
+
     </application>
 </manifest>

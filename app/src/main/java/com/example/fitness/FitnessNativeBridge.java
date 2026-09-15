@@ -92,6 +92,17 @@ public class FitnessNativeBridge {
     @JavascriptInterface
     public void requestExactAlarm() { activity.requestExactAlarmPermission(); }
 
+    /** 训练热力图数据同步：JS 在每次记录变更后整体覆盖「日期->部位」映射，并刷新桌面控件 */
+    @JavascriptInterface
+    public void saveWorkoutSummary(String json) {
+        try {
+            WorkoutStore.saveDaysJson(app, json);
+            HeatmapWidgetProvider.requestUpdate(app);
+        } catch (Throwable t) {
+            Log.w(TAG, "saveWorkoutSummary fail", t);
+        }
+    }
+
     /** 跳转「忽略电池优化」授权页（防系统杀后台） */
     @JavascriptInterface
     public void requestBattery() { activity.requestIgnoreBatteryOptimizations(); }

@@ -262,6 +262,36 @@
   .sound-scene-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
   .sound-scene-name{ flex:1; font-size:14px; color:var(--txt); }
   .sound-scene-select{ padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card2); color:var(--txt); font-size:13px; min-width:130px; }
+
+  /* 热力图（日历月视图） */
+  .hm-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .hm-title{ font-size:17px; font-weight:700; }
+  .hm-nav{ display:flex; gap:6px; align-items:center; }
+  .hm-nav button{ background:var(--card2); color:var(--txt); border:none; border-radius:9px; width:36px; height:36px; font-size:15px; cursor:pointer; }
+  .hm-nav button:active{ background:var(--chip); }
+  .hm-nav .hm-today-btn{ width:auto; padding:0 11px; font-size:13px; }
+  .hm-legend{ display:flex; gap:14px; align-items:center; margin:6px 0 12px; color:var(--sub); font-size:12px; flex-wrap:wrap; }
+  .hm-legend .hm-hint{ margin-left:auto; }
+  .hm-dot{ display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; }
+  .hm-cal{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+  .hm-wd{ text-align:center; font-size:12px; color:var(--sub); padding:2px 0; }
+  .hm-wd.weekend{ color:var(--warn); opacity:.7; }
+  .hm-cell{ position:relative; aspect-ratio:1; border-radius:10px; background:#1a1a1a; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; border:1.5px solid transparent; }
+  .hm-cell .hm-num{ font-size:14px; color:var(--sub); }
+  .hm-cell .hm-dots{ display:flex; gap:3px; margin-top:4px; }
+  .hm-dot-s{ width:7px; height:7px; border-radius:50%; }
+  .hm-cell.lv1{ background:rgba(30,94,143,.6); }
+  .hm-cell.lv2{ background:rgba(47,137,201,.68); }
+  .hm-cell.lv3{ background:rgba(79,195,247,.8); }
+  .hm-cell.hm-other{ background:rgba(43,77,99,.5); }
+  .hm-cell.trained .hm-num{ color:#fff; }
+  .hm-cell.today{ border-color:var(--acc); }
+  .hm-cell.empty{ background:transparent; border-color:transparent; cursor:default; }
+  .hm-stats{ display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .hm-stat{ background:var(--card); border-radius:12px; padding:10px 14px; flex:1; min-width:88px; text-align:center; }
+  .hm-stat b{ display:block; font-size:20px; color:var(--acc); }
+  .hm-stat span{ font-size:12px; color:var(--sub); }
+  .hm-streak{ background:rgba(79,195,247,.08); border:1px solid rgba(79,195,247,.3); color:var(--acc); border-radius:12px; padding:10px 14px; margin-top:12px; text-align:center; font-size:14px; }
 </style>
 </head>
 <body>
@@ -280,6 +310,7 @@
     <button data-tab="train" onclick="goTab('train')">⏱ 训练</button>
     <button data-tab="hiit" onclick="goTab('hiit')">🔥 HIIT</button>
     <button data-tab="stair" onclick="goTab('stair')">🧗 爬楼</button>
+    <button data-tab="heatmap" onclick="goTab('heatmap')">📅 热力图</button>
     <button data-tab="notes" onclick="goTab('notes')">📝 笔记</button>
     <button data-tab="settings" onclick="goTab('settings')">⚙ 设置</button>
   </nav>
@@ -382,7 +413,7 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg})); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg})); syncHeatmap(); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -1966,6 +1997,133 @@ function refreshSidebar(){
   el.innerHTML=`训练 <b>${state.groups.length}</b> 组 · HIIT <b>${hiit.sessions.length}</b> 次 · 爬楼 <b>${stair.sessions.length}</b> 次 · 历史 <b>${state.records.length}</b> 条 · 笔记 <b>${notes.length}</b> 篇`;
 }
 
+/* ============ 热力图（日历月视图 + 桌面控件数据同步） ============ */
+const HM_MAIN = ['胸','背','腿'];
+const HM_COLORS = { '胸':'#4fc3f7', '背':'#66bb6a', '腿':'#ffa726' };
+let hmMonth = new Date();       // 热力图当前展示的月份
+let lastHmSync = '';            // 最近一次已同步给原生的映射串（内容没变就不重复写）
+
+function hmKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function hmDaysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
+
+/* 从历史记录汇总：日期 -> {部位:组数}（用于界面渲染与同步原生） */
+function buildDayMap(){
+  const map = {};
+  state.records.forEach(r=>{
+    if(!r || !r.date || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) return;
+    const m = map[r.date] || (map[r.date] = {});
+    if(r.part) m[r.part] = (m[r.part]||0)+1;
+  });
+  return map;
+}
+
+/* 同步给原生（桌面控件数据源），仅内容变化时写一次 */
+function syncHeatmap(){
+  const json = JSON.stringify(buildDayMap());
+  if(json===lastHmSync) return;
+  lastHmSync = json;
+  Native.saveWorkoutSummary(json);
+}
+
+function hmNav(dir){
+  if(dir===0){ hmMonth=new Date(); }
+  else { hmMonth=new Date(hmMonth.getFullYear(), hmMonth.getMonth()+dir, 1); }
+  renderHeatmap();
+}
+
+/* 连续打卡天数：今天没练就从昨天往回数 */
+function hmStreak(dayMap){
+  const d=new Date();
+  if(!dayMap[hmKey(d)]) d.setDate(d.getDate()-1);
+  let n=0;
+  while(dayMap[hmKey(d)]){ n++; d.setDate(d.getDate()-1); }
+  return n;
+}
+
+function renderHeatmap(){
+  state.tab='heatmap';
+  const y=hmMonth.getFullYear(), m=hmMonth.getMonth();
+  const dayMap=buildDayMap();
+  const daysIn=hmDaysInMonth(y,m);
+  const firstDow=(new Date(y,m,1).getDay()+6)%7;   // 周一起始：周一=0
+  const now=new Date();
+  const isCur=(now.getFullYear()===y && now.getMonth()===m);
+  const todayKey=hmKey(now);
+  let trained=0, chest=0, back=0, legs=0;
+  for(let d=1; d<=daysIn; d++){
+    const key=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    const day=dayMap[key]; if(!day) continue;
+    trained++;
+    if(day['胸']) chest++;
+    if(day['背']) back++;
+    if(day['腿']) legs++;
+  }
+  const streak=hmStreak(dayMap);
+
+  let html=`<div class="section-title">📅 训练热力图</div>
+  <div class="card">
+    <div class="hm-head">
+      <div class="hm-title">${y}年${m+1}月</div>
+      <div class="hm-nav">
+        <button onclick="hmNav(-1)">◀</button>
+        <button class="hm-today-btn" onclick="hmNav(0)">本月</button>
+        <button onclick="hmNav(1)">▶</button>
+      </div>
+    </div>
+    <div class="hm-legend">
+      <span><span class="hm-dot" style="background:#4fc3f7"></span>胸</span>
+      <span><span class="hm-dot" style="background:#66bb6a"></span>背</span>
+      <span><span class="hm-dot" style="background:#ffa726"></span>腿</span>
+      <span class="hm-hint">颜色越亮 = 当天练到的部位越多</span>
+    </div>
+    <div class="hm-cal">
+      ${['一','二','三','四','五','六','日'].map((w,i)=>`<div class="hm-wd ${i>=5?'weekend':''}">${w}</div>`).join('')}
+      ${hmCells(y,m,dayMap,isCur,todayKey)}
+    </div>
+    <div class="hm-stats">
+      <div class="hm-stat"><b>${trained}</b><span>本月训练天数</span></div>
+      <div class="hm-stat"><b style="color:#4fc3f7">${chest}</b><span>胸</span></div>
+      <div class="hm-stat"><b style="color:#66bb6a">${back}</b><span>背</span></div>
+      <div class="hm-stat"><b style="color:#ffa726">${legs}</b><span>腿</span></div>
+    </div>
+    ${streak? `<div class="hm-streak">🔥 连续打卡 ${streak} 天</div>` : ''}
+    <div style="margin-top:12px;color:var(--sub);font-size:12px">点击任意日期可查看当天记录 · 未练为灰格，只练肩/腹为青灰格</div>
+  </div>`;
+  $('app').innerHTML=html;
+}
+
+function hmCells(y,m,dayMap,isCur,todayKey){
+  const daysIn=hmDaysInMonth(y,m);
+  const firstDow=(new Date(y,m,1).getDay()+6)%7;
+  let s='';
+  for(let i=0;i<firstDow;i++) s+=`<div class="hm-cell empty"></div>`;
+  for(let d=1; d<=daysIn; d++){
+    const key=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    const day=dayMap[key];
+    const isToday=isCur && key===todayKey;
+    let cls='hm-cell', dots='';
+    if(day){
+      const main=HM_MAIN.filter(p=>day[p]);
+      const hasOther=(day['肩']||0)+(day['腹']||0)>0;
+      if(main.length){ cls+=` lv${main.length} trained`; dots=`<span class="hm-dots">${main.map(p=>`<span class="hm-dot-s" style="background:${HM_COLORS[p]}"></span>`).join('')}</span>`; }
+      else if(hasOther){ cls+=' hm-other trained'; }
+    } else { cls+=' dim'; }
+    if(isToday) cls+=' today';
+    s+=`<div class="${cls}" onclick="hmShowDay('${key}')"><span class="hm-num">${d}</span>${dots}</div>`;
+  }
+  return s;
+}
+
+/* 点击某天：弹层展示当天记录 */
+function hmShowDay(date){
+  const recs=state.records.filter(r=>r.date===date).slice().sort((a,b)=>(a.t||'').localeCompare(b.t||''));
+  if(!recs.length){ alert('这一天没有训练记录'); return; }
+  const lines=recs.map(r=>`<div class="hist-item"><span class="h-time">${r.t||''}</span><span class="h-body">${escHtml(fmtRecordLine(r))}</span></div>`).join('');
+  const el=$('action-sheet');
+  el.innerHTML=`<div class="as-head"><div class="as-title">📅 ${date} · ${recs.length} 条记录</div></div><div style="max-height:60vh;overflow-y:auto">${lines}</div><button class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="closeNoteSheet()">关闭</button>`;
+  el.classList.add('show'); $('sheet-mask').classList.add('show');
+}
+
 /* ============ 原生桥接（安卓 App 强提醒）============
  * 在 WebView 里，安卓会注入 window.FitnessNative（addJavascriptInterface）。
  * 打包成 App 时：倒计时归零 → 原生弹「锁屏弹窗 + 悬浮窗 + 震动」。
@@ -1986,6 +2144,9 @@ const Native = {
   },
   cancelCountdown(){                // 暂停/重置/记录完成时取消系统闹钟
     try{ if(window.FitnessNative && window.FitnessNative.cancelCountdown) window.FitnessNative.cancelCountdown(); }catch(e){}
+  },
+  saveWorkoutSummary(json){         // 同步热力图数据给原生（桌面控件数据源）
+    try{ if(window.FitnessNative && window.FitnessNative.saveWorkoutSummary) window.FitnessNative.saveWorkoutSummary(json); }catch(e){}
   },
   requestExactAlarm(){              // 跳转「精确闹钟」授权页
     try{ if(window.FitnessNative && window.FitnessNative.requestExactAlarm) window.FitnessNative.requestExactAlarm(); }catch(e){}
@@ -2024,6 +2185,7 @@ function switchTab(tab){
   if(tab==='train') renderTrain();
   else if(tab==='hiit') renderHiit();
   else if(tab==='stair') renderStair();
+  else if(tab==='heatmap') renderHeatmap();
   else if(tab==='settings') renderSettings();
   else if(tab==='notes') renderNotes();
   refreshSidebar();
@@ -2031,7 +2193,7 @@ function switchTab(tab){
 
 /* ============ 初始化 ============ */
 function init(){
-  load(); loadNotes(); loadHiit(); loadStair(); renderTrain(); tick();
+  load(); loadNotes(); loadHiit(); loadStair(); syncHeatmap(); renderTrain(); tick();
   refreshSidebar();
   const sc = Native.getSoundConfig();
   if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 控件深色圆角底（与位图自绘背景同色，避免四角露白） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#141414" />
+    <corners android:radius="16dp" />
+</shape>
