@@ -30,7 +30,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 长按 App 图标弹出的快捷菜单（shortcuts.xml） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- 长按图标「添加热力图控件」菜单项的中转页：透明、即刻关闭，只触发系统钉选流程 -->
+        <activity
+            android:name=".AddWidgetActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.TransparentPin" />
 
         <!-- 锁屏/全屏强提醒弹窗 -->
         <activity
@@ -41,6 +54,11 @@
             android:showOnLockScreen="true"
             android:turnScreenOn="true"
             android:excludeFromRecents="true" />
+
+        <!-- 锁屏通知上的操作按钮（关闭/再休息1分钟）：全屏弹窗没弹出时也能在锁屏上直接操作 -->
+        <receiver
+            android:name=".AlarmActionReceiver"
+            android:exported="false" />
 
         <!-- 悬浮窗（SYSTEM_ALERT_WINDOW），可选增强 -->
         <service
@@ -79,6 +97,11 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/heatmap_widget_info" />
         </receiver>
+
+        <!-- requestPinAppWidget 钉选结果回调（成功时带 EXTRA_APPWIDGET_ID） -->
+        <receiver
+            android:name=".WidgetPinCallbackReceiver"
+            android:exported="false" />
 
     </application>
 </manifest>
