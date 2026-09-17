@@ -20,8 +20,8 @@ android {
         applicationId "com.example.fitness"
         minSdk 26                 // Android 8.0+（悬浮窗/锁屏弹窗所需 API 均覆盖）
         targetSdk 34
-        versionCode 123           // 与版本号 1.2.3 对应（首次 Release 基线，之后随 patch +1）
-        versionName "1.2.3"
+        versionCode 124           // 与版本号 1.2.4 对应（首次 Release 基线，之后随 patch +1）
+        versionName "1.2.4"
     }
 
     buildTypes {

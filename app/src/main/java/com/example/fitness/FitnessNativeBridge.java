@@ -61,6 +61,8 @@ public class FitnessNativeBridge {
                    != PackageManager.PERMISSION_GRANTED) {
             runOnUi(activity::requestNotificationPermission);
         }
+        // 主动引导：锁屏关键权限（通知/全屏/后台弹出界面等）缺失时弹一次，让用户直接去系统设置开启
+        runOnUi(activity::checkReminderPermsForCountdown);
         CountdownService.start(app, restSeconds, endAtMillis);
     }
 
@@ -129,7 +131,7 @@ public class FitnessNativeBridge {
 
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
 
-    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound,exactAlarm,battery,fullScreen} */
+    /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound,exactAlarm,battery,fullScreen,miui,channelOk} */
     @JavascriptInterface
     public String getPermissionState() {
         try {
@@ -143,6 +145,8 @@ public class FitnessNativeBridge {
             o.put("exactAlarm", canExactAlarm());
             o.put("battery", ignoringBatteryOptimizations());
             o.put("fullScreen", canUseFullScreenIntent());
+            o.put("miui", activity.isMiuiRom());
+            o.put("channelOk", activity.isAlarmChannelEnabled());
             return o.toString();
         } catch (Throwable t) { return "{}"; }
     }
@@ -162,6 +166,18 @@ public class FitnessNativeBridge {
     /** 直达 Android 14+「全屏通知」开关页（锁屏弹窗依赖它） */
     @JavascriptInterface
     public void openFullScreenSettings() { activity.openFullScreenIntentSettings(); }
+
+    /** 打开锁屏提醒设置页：澎湃OS 走应用详情（权限/通知/自启动/省电策略），其他走通知设置 */
+    @JavascriptInterface
+    public void openReminderSettings() { activity.openReminderSettings(); }
+
+    /** 澎湃OS/小米「自启动」管理页（默认禁止，会导致杀后台后到点不提醒） */
+    @JavascriptInterface
+    public void openAutoStartSettings() { activity.openAutoStartSettings(); }
+
+    /** 倒计时开始时主动检查锁屏权限，缺失则弹引导（供 JS 调用） */
+    @JavascriptInterface
+    public void checkReminderPerms() { activity.checkReminderPermsForCountdown(); }
 
     private boolean hasNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

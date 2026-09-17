@@ -25,7 +25,7 @@ import android.util.Log;
 public final class Reminder {
 
     private static final String TAG = "FitnessReminder";
-    private static final String CHANNEL_ID = "fitness_alarm";
+    static final String CHANNEL_ID = "fitness_alarm";   // 同包可见（MainActivity 权限检测要用）
     public static final int NOTIFY_ID = 9001;
 
     private static MediaPlayer alarmPlayer;
@@ -240,6 +240,14 @@ public final class Reminder {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
+            // 用户在系统里把「训练提醒」通道整个关掉过（部分 ROM 还会默认降级）：到点不弹横幅/全屏，
+            // 这是「锁屏看不到可点击提醒」的常见原因。检测到被禁用则删除重建，恢复高重要度。
+            try {
+                NotificationChannel old = nm.getNotificationChannel(CHANNEL_ID);
+                if (old != null && old.getImportance() == NotificationManager.IMPORTANCE_NONE) {
+                    nm.deleteNotificationChannel(CHANNEL_ID);
+                }
+            } catch (Throwable ignored) {}
             NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "训练提醒",
                     NotificationManager.IMPORTANCE_HIGH); // 高重要度 = 弹出（heads-up）
             ch.setDescription("倒计时归零时的强提醒");
