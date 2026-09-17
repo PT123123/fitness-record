@@ -5,11 +5,15 @@ import android.app.AlertDialog;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlarmManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
@@ -29,6 +33,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
@@ -92,6 +98,8 @@ public class MainActivity extends Activity {
         web.loadUrl("file:///android_asset/index.html");
 
         ensureNotificationPermission();
+        // 启动时主动检查锁屏提醒所需权限：缺失则弹引导（延迟片刻，避免与系统权限对话框叠加）
+        new Handler(Looper.getMainLooper()).postDelayed(this::ensureReminderPermissions, 1200);
     }
 
     /** Android 13+ 需动态申请通知权限，否则强提醒通知不弹出 */
@@ -163,6 +171,137 @@ public class MainActivity extends Activity {
                 }
             }
         }
+    }
+
+    /* ==================== 锁屏提醒权限：主动引导（澎湃OS 专属） ==================== */
+
+    /** 引导弹窗频率限制：进程内 5 分钟最多弹一次，避免刷屏 */
+    private static volatile long sLastGuideAt = 0L;
+
+    /** 是否澎湃OS/小米 ROM（HyperOS / MIUI）：锁屏弹窗还额外依赖「后台弹出界面」「自启动」 */
+    public boolean isMiuiRom() {
+        try {
+            String m = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase();
+            String b = Build.BRAND == null ? "" : Build.BRAND.toLowerCase();
+            String d = Build.DISPLAY == null ? "" : Build.DISPLAY.toUpperCase();
+            return m.contains("xiaomi") || m.contains("redmi") || m.contains("poco")
+                    || b.contains("xiaomi") || b.contains("redmi") || b.contains("poco")
+                    || d.contains("HYPEROS") || d.contains("MIUI");
+        } catch (Throwable t) { return false; }
+    }
+
+    /** Android 14+「全屏通知」开关（锁屏弹窗的关键依赖）是否可用 */
+    public boolean canUseFullScreenIntent() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                return nm != null && nm.canUseFullScreenIntent();
+            } catch (Throwable t) { return true; }
+        }
+        return true;
+    }
+
+    /** 强提醒通知通道是否被用户在系统里关闭（关闭后不弹横幅/全屏） */
+    public boolean isAlarmChannelEnabled() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return true;
+            NotificationChannel ch = nm.getNotificationChannel(Reminder.CHANNEL_ID);
+            return ch == null || ch.getImportance() != NotificationManager.IMPORTANCE_NONE;
+        } catch (Throwable t) { return true; }
+    }
+
+    /** 汇总当前缺失的锁屏提醒权限项（供启动/倒计时开始时判断） */
+    private List<String> collectMissingPerms() {
+        List<String> missing = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                   != PackageManager.PERMISSION_GRANTED) {
+            missing.add("通知权限（到点弹提醒横幅）");
+        }
+        if (!canUseFullScreenIntent()) {
+            missing.add("「全屏通知」开关（锁屏弹出提醒页面）");
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isAlarmChannelEnabled()) {
+            missing.add("「训练提醒」通知通道被关闭");
+        }
+        if (isMiuiRom() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            // 澎湃OS/小米：显示悬浮窗权限页即「后台弹出界面」开关，锁屏/后台弹 Activity 依赖它
+            missing.add("「后台弹出界面」（锁屏上弹出提醒页）");
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                missing.add("电池优化设为「无限制」（防杀后台）");
+            }
+        }
+        return missing;
+    }
+
+    /** 启动时主动引导：关键权限缺失且本进程未提示过 → 弹引导 */
+    private void ensureReminderPermissions() {
+        if (sLastGuideAt != 0L) return; // 本进程已提示过
+        List<String> missing = collectMissingPerms();
+        if (missing.isEmpty()) return;
+        sLastGuideAt = System.currentTimeMillis();
+        showPermissionGuide(missing, false);
+    }
+
+    /** 供 JS 桥接：倒计时开始时检查锁屏关键权限，缺失则弹引导（5 分钟内不重复） */
+    public void checkReminderPermsForCountdown() {
+        List<String> missing = collectMissingPerms();
+        if (missing.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        if (now - sLastGuideAt < 5 * 60 * 1000L) return;
+        sLastGuideAt = now;
+        showPermissionGuide(missing, true);
+    }
+
+    /** 弹权限引导对话框：「去开启」直达系统设置 */
+    private void showPermissionGuide(List<String> missing, boolean fromCountdown) {
+        StringBuilder sb = new StringBuilder("要让倒计时结束在锁屏上弹出「可点击的提醒」，还需要开启：\n");
+        for (String m : missing) sb.append(" · ").append(m).append("\n");
+        if (isMiuiRom()) {
+            sb.append("澎湃OS/小米：开启后请再回到应用详情，允许「自启动」，并检查「后台弹出界面」已打开。");
+        } else {
+            sb.append("开启后锁屏到点就会直接弹出提醒页面。");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(fromCountdown ? "倒计时提醒待开启" : "锁屏提醒权限待开启")
+                .setMessage(sb.toString())
+                .setPositiveButton("去开启", (d, w) -> openReminderSettings())
+                .setNegativeButton("暂不", (d, w) -> {})
+                .setCancelable(false)
+                .show();
+    }
+
+    /** 打开锁屏提醒相关设置页：澎湃OS 走应用详情（权限/通知/自启动/省电策略一站式），其他走通知设置 */
+    public void openReminderSettings() {
+        if (isMiuiRom()) {
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName())));
+                return;
+            } catch (Throwable t) { /* 回退到通知设置 */ }
+        }
+        openAppSettings();
+    }
+
+    /** 澎湃OS/小米「自启动」管理页（默认禁止，杀后台会导致到点不提醒） */
+    public void openAutoStartSettings() {
+        try {
+            Intent i = new Intent();
+            i.setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity");
+            i.putExtra("extra_pkgname", getPackageName());
+            startActivity(i);
+            return;
+        } catch (Throwable t) { /* 尝试旧版入口 */ }
+        try {
+            Intent i2 = new Intent("miui.intent.action.OP_AUTO_START");
+            i2.addCategory(Intent.CATEGORY_DEFAULT);
+            i2.putExtra("packageName", getPackageName());
+            startActivity(i2);
+        } catch (Throwable t2) { openReminderSettings(); }
     }
 
     /* ==================== 笔记导入 / 导出 ==================== */

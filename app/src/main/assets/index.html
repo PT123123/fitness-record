@@ -1494,7 +1494,7 @@ function permState(){
   let notif=false;
   try{ if(window.Notification) notif = Notification.permission==='granted'; }catch(e){}
   return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0, sound:0,
-           exactAlarm:null, battery:null, fullScreen:null };
+           exactAlarm:null, battery:null, fullScreen:null, miui:false, channelOk:true };
 }
 function permBadge(ok){
   if(ok===true) return '<span class="p-state ok">已授权</span>';
@@ -1520,6 +1520,12 @@ function renderSettings(){
         ${p.fullScreen?'':'<button class="p-act" onclick="askFullScreen()">去系统设置</button>'}
       </div>
       <div class="perm-item">
+        <div class="p-info"><div class="p-name">训练提醒通知通道</div>
+          <div class="p-desc">通道被关闭时横幅/全屏弹窗都不出现；App 已会自动恢复，仍异常时点这里去开启</div></div>
+        ${permBadge(p.channelOk)}
+        ${p.channelOk?'':'<button class="p-act" onclick="askChannel()">去开启</button>'}
+      </div>
+      <div class="perm-item">
         <div class="p-info"><div class="p-name">精确闹钟（准点）</div>
           <div class="p-desc">到点分秒不差；Android 12+ 需系统授权，未授权时前台服务仍可准时提醒</div></div>
         ${permBadge(p.exactAlarm)}
@@ -1542,6 +1548,16 @@ function renderSettings(){
           <div class="p-desc">归零时震动提醒，无需申请</div></div>
         ${permBadge(true)}
       </div>
+      ${p.miui?`
+      <div style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,120,40,0.07)">
+        <div class="p-name" style="font-size:13px;font-weight:600">澎湃OS / 小米专属（锁屏弹窗必需）</div>
+        <div class="p-desc" style="font-size:12px;color:var(--sub);margin:4px 0 8px">在应用详情里开启「后台弹出界面」、允许「自启动」，并把省电策略设为「无限制」，锁屏到点才会弹出可点击的提醒页</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askOverlay()">后台弹出界面</button>
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askAutoStart()">自启动</button>
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askReminderSettings()">应用详情 / 省电策略</button>
+        </div>
+      </div>`:''}
       <div class="field-label" style="margin-top:14px">闹铃声音 <span style="color:#666;font-size:12px">（15 种铃声，可按场景单独设置）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">统一铃声（点一下应用到所有场景）</div>
       <div class="chips">
@@ -1616,6 +1632,18 @@ function askExactAlarm(){
 }
 function askBattery(){
   try{ if(window.FitnessNative && window.FitnessNative.requestBattery){ window.FitnessNative.requestBattery(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askChannel(){
+  try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askAutoStart(){
+  try{ if(window.FitnessNative && window.FitnessNative.openAutoStartSettings){ window.FitnessNative.openAutoStartSettings(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askReminderSettings(){
+  try{ if(window.FitnessNative && window.FitnessNative.openReminderSettings){ window.FitnessNative.openReminderSettings(); return; } }catch(e){}
   alert('浏览器预览无此设置，需安装安卓 App');
 }
 function testReminder(){
