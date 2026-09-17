@@ -9,4 +9,11 @@
         <item name="android:turnScreenOn">true</item>
         <item name="android:keepScreenOn">true</item>
     </style>
+
+    <!-- 长按图标「添加热力图控件」中转页：透明、无界面、即刻关闭 -->
+    <style name="Theme.TransparentPin" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

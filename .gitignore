@@ -15,3 +15,6 @@ local.properties
 
 # 本地备份（非交付物）
 _backup/
+
+# Release 产物（APK 通过 GitHub Release 附件分发）
+dist/

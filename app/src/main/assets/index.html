@@ -1760,6 +1760,8 @@ function notesPageHead(){
       <option value="created"${noteSort==='created'?' selected':''}>创建时间</option>
       <option value="title"${noteSort==='title'?' selected':''}>标题 A-Z</option>
     </select>
+    <button class="note-msel-btn" onclick="importNotesFile()">导入</button>
+    <button class="note-msel-btn" onclick="exportNotesFile()">导出</button>
     <button class="note-msel-btn${noteMsel?' on':''}" onclick="toggleNoteMsel()">${noteMsel?'完成':'多选'}</button>
   </div>`;
 }
@@ -1912,6 +1914,70 @@ function sendNote(){
   notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
   noteDraft='';
   persistNotes(); renderNotes();
+}
+
+/* —— 笔记导入 / 导出（JSON 备份；导出走系统分享/下载，导入从文件合并，按 id 去重） —— */
+function notesExportPayload(){
+  return JSON.stringify({ app:'fitness-record', type:'notes', version:1, exportedAt:Date.now(), noteCount:notes.length, notes }, null, 2);
+}
+function exportNotesFile(){
+  if(!notes.length){ alert('还没有笔记可导出'); return; }
+  const payload=notesExportPayload();
+  const fname='fitness-notes-'+today().replace(/-/g,'')+'.json';
+  if(window.FitnessNative && window.FitnessNative.exportNotes){
+    try{ window.FitnessNative.exportNotes(payload, fname); return; }catch(e){}
+  }
+  const blob=new Blob([payload], {type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+}
+function importNotesFile(){
+  if(window.FitnessNative && window.FitnessNative.pickNotesFile){
+    try{ window.FitnessNative.pickNotesFile(); return; }catch(e){}
+  }
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=()=>{
+    const f=inp.files && inp.files[0];
+    if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>mergeImportedNotes(String(rd.result||''));
+    rd.onerror=()=>alert('读取文件失败');
+    rd.readAsText(f,'utf-8');
+  };
+  inp.click();
+}
+/* 原生文件选择器选中后回调：content=文件文本；null=用户取消 */
+window.__onNotesPicked=function(content, name){
+  if(content==null) return;
+  mergeImportedNotes(String(content));
+};
+function mergeImportedNotes(text){
+  let arr=null;
+  try{
+    const d=JSON.parse(text);
+    if(Array.isArray(d)) arr=d;
+    else if(d && Array.isArray(d.notes)) arr=d.notes;
+  }catch(e){}
+  if(!arr){ alert('导入失败：不是有效的笔记备份（请选择「导出笔记」生成的 JSON 文件）'); return; }
+  const existing=new Set(notes.map(n=>n.id));
+  let added=0, skipped=0;
+  arr.forEach(raw=>{
+    if(!raw || typeof raw!=='object'){ skipped++; return; }
+    const content=String(raw.content||'').trim();
+    if(!content){ skipped++; return; }
+    const id=(raw.id && typeof raw.id==='string') ? raw.id : uid();
+    if(existing.has(id)){ skipped++; return; }
+    existing.add(id);
+    notes.push({ id, content, pinned:!!raw.pinned, createdAt:Number(raw.createdAt)||Date.now(), updatedAt:Number(raw.updatedAt)||Date.now() });
+    added++;
+  });
+  if(!added && skipped===0){ alert('导入失败：文件里没有笔记内容'); return; }
+  persistNotes(); renderNotes();
+  alert(`导入完成：新增 ${added} 篇${skipped?`，跳过 ${skipped} 篇（重复/空）`:''}`);
 }
 
 /* —— 多选 —— */

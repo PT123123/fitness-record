@@ -113,6 +113,20 @@ public class FitnessNativeBridge {
     @JavascriptInterface
     public void requestBattery() { activity.requestIgnoreBatteryOptimizations(); }
 
+    /* ==================== 笔记导入 / 导出 ==================== */
+
+    /** 导出笔记：把 JS 传来的 JSON 写入缓存文件，通过系统分享面板分享（MainActivity 处理） */
+    @JavascriptInterface
+    public void exportNotes(String json, String filename) {
+        activity.exportNotesFile(json, filename);
+    }
+
+    /** 导入笔记：拉起系统文件选择器，选中后读取内容回传 JS（MainActivity 处理） */
+    @JavascriptInterface
+    public void pickNotesFile() {
+        activity.pickNotesFile();
+    }
+
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
 
     /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound,exactAlarm,battery,fullScreen} */
