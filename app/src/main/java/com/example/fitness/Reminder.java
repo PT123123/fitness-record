@@ -112,6 +112,13 @@ public final class Reminder {
         // 全屏通知：锁屏/后台时由系统在锁屏上拉起 AlarmActivity（Android 10+ 后台启动的官方通道）
         PendingIntent pi = PendingIntent.getActivity(ctx, 0, alarm,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        // 操作按钮：全屏弹窗因权限/ROM 没弹出时，锁屏通知上也能直接「关闭」或「再休息1分钟」
+        PendingIntent dismissPi = PendingIntent.getBroadcast(ctx, 2,
+                new Intent(ctx, AlarmActionReceiver.class).setAction(AlarmActionReceiver.ACTION_DISMISS),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent snoozePi = PendingIntent.getBroadcast(ctx, 3,
+                new Intent(ctx, AlarmActionReceiver.class).setAction(AlarmActionReceiver.ACTION_SNOOZE),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
             Notification.Builder b = new Notification.Builder(ctx, CHANNEL_ID)
@@ -123,7 +130,10 @@ public final class Reminder {
                     .setVisibility(Notification.VISIBILITY_PUBLIC)
                     .setAutoCancel(true)
                     .setContentIntent(pi)
-                    .setFullScreenIntent(pi, true);
+                    .setFullScreenIntent(pi, true)
+                    .addAction(0, "关闭提醒", dismissPi)
+                    .addAction(0, "再休息1分钟", snoozePi)
+                    .setDeleteIntent(dismissPi); // 用户在通知上滑走 = 关掉提醒（否则声音会一直响）
             // 声音统一由 MediaPlayer 直接播放（见 startAlarmSound），通知自身静音避免双音
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) b.setSound(null, null);
             else b.setSound(null);

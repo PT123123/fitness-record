@@ -55,6 +55,12 @@ public class FitnessNativeBridge {
     /** 登记倒计时：启动前台服务保活 + 系统精确闹钟兜底，锁屏/后台到点准时提醒 */
     @JavascriptInterface
     public void scheduleCountdown(int restSeconds, long endAtMillis) {
+        // 倒计时开始前确保通知权限（Android 13+）：否则到点通知被系统静默丢弃，锁屏弹窗也不会出现
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS)
+                   != PackageManager.PERMISSION_GRANTED) {
+            runOnUi(activity::requestNotificationPermission);
+        }
         CountdownService.start(app, restSeconds, endAtMillis);
     }
 
@@ -138,6 +144,10 @@ public class FitnessNativeBridge {
     /** 打开本应用系统设置页（通知/全屏通知开关） */
     @JavascriptInterface
     public void openAppSettings() { activity.openAppSettings(); }
+
+    /** 直达 Android 14+「全屏通知」开关页（锁屏弹窗依赖它） */
+    @JavascriptInterface
+    public void openFullScreenSettings() { activity.openFullScreenIntentSettings(); }
 
     private boolean hasNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

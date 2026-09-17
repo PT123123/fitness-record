@@ -1515,7 +1515,7 @@ function renderSettings(){
       </div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">锁屏 / 全屏弹窗</div>
-          <div class="p-desc">锁屏上直接弹出提醒界面；Android 14+ 需在系统通知设置里打开「全屏通知」</div></div>
+          <div class="p-desc">锁屏上直接弹出提醒界面；Android 14+ 需在系统通知设置里打开「全屏通知」，小米/红米还须允许「后台弹出界面」</div></div>
         ${permBadge(p.fullScreen)}
         ${p.fullScreen?'':'<button class="p-act" onclick="askFullScreen()">去系统设置</button>'}
       </div>
@@ -1589,7 +1589,7 @@ function renderSettings(){
       <div class="field-label">为什么休息结束没有系统提醒？</div>
       <p style="color:var(--sub);font-size:13px;line-height:1.7">
         ${isNative? '当前为安卓 App：倒计时期间会启动「前台服务」保活，到点由前台服务 + 系统精确闹钟双通道触发，锁屏/退后台也会提醒；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
-        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
+        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」和「后台弹出界面」（否则锁屏弹不出提醒页面）；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
         点「测试系统提醒」可立即验证整条链路。
       </p>
     </div>`;
@@ -1606,6 +1606,7 @@ function askOverlay(){
   alert('浏览器预览没有悬浮窗权限，需安装安卓 App 后在系统设置中开启');
 }
 function askFullScreen(){
+  try{ if(window.FitnessNative && window.FitnessNative.openFullScreenSettings){ window.FitnessNative.openFullScreenSettings(); return; } }catch(e){}
   try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
   alert('浏览器预览没有该系统设置，需安装安卓 App');
 }

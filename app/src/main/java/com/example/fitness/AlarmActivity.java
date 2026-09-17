@@ -1,6 +1,7 @@
 package com.example.fitness;
 
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
@@ -36,6 +37,11 @@ public class AlarmActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             setTurnScreenOn(true);
+            // 解除锁屏 keyguard：让「记录这组 / 再休息1分钟 / 关闭」按钮在锁屏上直接可点
+            KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+            if (km != null && km.isKeyguardLocked()) {
+                try { km.requestDismissKeyguard(this, null); } catch (Throwable ignored) {}
+            }
         } else {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                     | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON

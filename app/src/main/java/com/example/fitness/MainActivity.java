@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -108,6 +109,21 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             try { startActivity(new Intent(Settings.ACTION_SETTINGS)); } catch (Throwable ignored) {}
         }
+    }
+
+    /** 直达 Android 14+「全屏通知」开关页（锁屏弹窗依赖它）；部分 ROM 不支持时退回通知设置页 */
+    public void openFullScreenIntentSettings() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                Intent i = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+                return;
+            } catch (Throwable t) {
+                Log.w("FitnessMain", "no FSI settings page, fallback", t);
+            }
+        }
+        openAppSettings();
     }
 
     /** 跳转「精确闹钟」授权页（Android 12+；到点准点触发依赖它，未授权时前台服务仍可准时提醒） */
