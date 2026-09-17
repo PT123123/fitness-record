@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 笔记导出：缓存目录下的临时备份文件，经 FileProvider 授权给分享目标读取 -->
+    <cache-path name="notes_export" path="notes-export/" />
+</paths>

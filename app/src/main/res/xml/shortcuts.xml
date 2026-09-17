@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 长按 App 图标弹出的快捷菜单：一键把训练热力图控件添加到桌面（Android 7.1+ 桌面支持） -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="add_heatmap_widget"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_add_widget_short"
+        android:shortcutLongLabel="@string/shortcut_add_widget_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.example.fitness"
+            android:targetClass="com.example.fitness.AddWidgetActivity" />
+    </shortcut>
+</shortcuts>

@@ -2,4 +2,9 @@
 <resources>
     <string name="app_name">健身训练记录</string>
     <string name="widget_heatmap_desc">按月历显示训练热力图：颜色越亮，当天练到的部位（胸/背/腿）越多</string>
+    <!-- 长按 App 图标快捷菜单：添加桌面控件 -->
+    <string name="shortcut_add_widget_short">添加热力图控件</string>
+    <string name="shortcut_add_widget_long">把训练热力图控件添加到桌面</string>
+    <string name="widget_pin_not_supported">当前桌面不支持快捷添加，请长按桌面空白处 → 小组件 → 找到「健身训练记录」手动添加</string>
+    <string name="widget_pin_success">训练热力图控件已添加到桌面</string>
 </resources>

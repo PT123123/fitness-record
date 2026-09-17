@@ -23,11 +23,19 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
     private WebView web;
     private static final int REQ_NOTIFY = 1001;
+    private static final int REQ_PICK_NOTES = 1002;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -155,6 +163,97 @@ public class MainActivity extends Activity {
                 }
             }
         }
+    }
+
+    /* ==================== 笔记导入 / 导出 ==================== */
+
+    /** 导出笔记：把 JS 传来的 JSON 写入缓存文件，走系统分享面板（FileProvider 授权读取） */
+    public void exportNotesFile(String json, String filename) {
+        runOnUiThread(() -> {
+            try {
+                File dir = new File(getCacheDir(), "notes-export");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, safeFileName(filename));
+                try (FileOutputStream out = new FileOutputStream(f)) {
+                    out.write((json == null ? "" : json).getBytes(StandardCharsets.UTF_8));
+                }
+                Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("application/json");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(send, "导出笔记"));
+            } catch (Throwable t) {
+                Log.w("FitnessMain", "exportNotesFile fail", t);
+                evalJs("alert('导出失败，请重试')");
+            }
+        });
+    }
+
+    /** 导入笔记：拉起系统文件选择器（JSON），选中后读取内容回传 JS */
+    public void pickNotesFile() {
+        runOnUiThread(() -> {
+            try {
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.setType("application/json");
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                startActivityForResult(Intent.createChooser(i, "选择笔记备份文件"), REQ_PICK_NOTES);
+            } catch (Throwable t) {
+                Log.w("FitnessMain", "pickNotesFile fail", t);
+                try {
+                    Intent f = new Intent(Intent.ACTION_GET_CONTENT);
+                    f.setType("*/*");
+                    f.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(Intent.createChooser(f, "选择笔记备份文件"), REQ_PICK_NOTES);
+                } catch (Throwable t2) {
+                    evalJs("alert('无法打开文件选择器')");
+                }
+            }
+        });
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_PICK_NOTES) {
+            String content = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                content = readUriText(data.getData());
+            }
+            final String c = content;
+            runOnUiThread(() -> {
+                if (web == null) return;
+                String js = "window.__onNotesPicked(" + (c == null ? "null" : JSONObject.quote(c)) + ")";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    web.evaluateJavascript(js, null);
+                } else {
+                    web.loadUrl("javascript:" + js);
+                }
+            });
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private String readUriText(Uri uri) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) return null;
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            Log.w("FitnessMain", "readUriText fail", t);
+            return null;
+        }
+    }
+
+    private String safeFileName(String name) {
+        if (name == null) return "fitness-notes.json";
+        String n = name.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+        if (n.isEmpty()) n = "fitness-notes.json";
+        if (!n.toLowerCase().endsWith(".json")) n += ".json";
+        return n;
     }
 
     /** 从系统设置返回时通知 JS 刷新权限状态（设置页的「重新检查」也会用到） */
