@@ -15,18 +15,19 @@ import java.util.Set;
 /**
  * 把「某月哪天练了什么」渲染成一张位图，供桌面 2x2 热力图控件使用。
  * 布局：月标题（含本月训练天数）→ 周表头（一~日）→ 6 行 × 7 列日历格子（周一起始）。
- * 格子颜色按当天练到的部位数分级（1/2/3+），只练肩/腹为弱色，今天加白色描边。
+ * 格子颜色按当天练到的部位着色（胸=蓝、背=绿、腿=橙，多部位混合），只练肩/腹为青灰，今天加白色描边。
+ * 底部一行显示胸/背/腿最近一次训练距今天数（与格子同色）。
  */
 public class HeatmapRenderer {
 
-    // 分级色：0 未练 / 1 只练肩腹 / 2 练到1个主要部位 / 3 练到2个 / 4 练到3个
-    private static final int[] LEVEL_COLORS = {
-            0xFF232323,
-            0xFF2b4d63,
-            0xFF1e5e8f,
-            0xFF2f89c9,
-            0xFF4fc3f7
-    };
+    // 部位主色（与 App 内热力图一致）：胸=蓝、背=绿、腿=橙
+    private static final int COLOR_CHEST = 0xFF4fc3f7;
+    private static final int COLOR_BACK = 0xFF66bb6a;
+    private static final int COLOR_LEG = 0xFFffa726;
+
+    // 分级色：0 未练 / 1 只练肩腹（青灰）
+    private static final int COLOR_NONE = 0xFF232323;
+    private static final int COLOR_OTHER = 0xFF2b4d63;
 
     public static Bitmap render(Context ctx, Map<String, Set<String>> days, int wPx, int hPx, long nowMillis) {
         Bitmap bmp = Bitmap.createBitmap(Math.max(1, wPx), Math.max(1, hPx), Bitmap.Config.ARGB_8888);
@@ -43,7 +44,7 @@ public class HeatmapRenderer {
         float gap = 1.5f * d;
         float titleH = 15f * d;
         float headerH = 11f * d;
-        float footerH = 11f * d;
+        float footerH = 13f * d;
         float contentW = wPx - 2 * pad;
         float cellW = (contentW - 6 * gap) / 7f;
         float gridTop = pad + titleH + headerH;
@@ -112,7 +113,7 @@ public class HeatmapRenderer {
 
                 Set<String> parts = days.get(key(year, month, dom));
                 int level = level(parts);
-                cellPaint.setColor(LEVEL_COLORS[level]);
+                cellPaint.setColor(dayColor(parts));
                 c.drawRoundRect(rc, cellCorner, cellCorner, cellPaint);
                 if (dom == todayDom) {
                     c.drawRoundRect(rc, cellCorner, cellCorner, stroke);
@@ -131,17 +132,39 @@ public class HeatmapRenderer {
         footPaint.setTextSize(8.5f * d);
         footPaint.setTextAlign(Paint.Align.CENTER);
         fm = footPaint.getFontMetrics();
-        float footY = hPx - pad - (footerH - (fm.descent - fm.ascent)) / 2f - fm.ascent;
+        // 文字紧贴日历下方（留 2dp 间距），底部再留安全边距避免下半截被裁
+        float footBaseline = gridTop + gridH + 2f * d - fm.ascent;
         float segW = contentW / 3f;
         String[] partNames = {"胸", "背", "腿"};
-        int[] partColors = {0xFF4fc3f7, 0xFF66bb6a, 0xFFffa726};
+        int[] partColors = {COLOR_CHEST, COLOR_BACK, COLOR_LEG};
         for (int i = 0; i < 3; i++) {
             int ago = lastTrainedDaysAgo(days, partNames[i], year, month, todayDom);
             String text = ago < 0 ? partNames[i] + " —" : partNames[i] + " " + ago + "天前";
             footPaint.setColor(partColors[i]);
-            c.drawText(text, pad + segW * i + segW / 2f, footY, footPaint);
+            c.drawText(text, pad + segW * i + segW / 2f, footBaseline, footPaint);
         }
         return bmp;
+    }
+
+    /** 当天格子颜色：练了哪个部位就用哪个部位的颜色，多部位混合；只练肩/腹为青灰 */
+    private static int dayColor(Set<String> parts) {
+        if (parts == null || parts.isEmpty()) return COLOR_NONE;
+        boolean chest = parts.contains("胸");
+        boolean back = parts.contains("背");
+        boolean leg = parts.contains("腿");
+        if (!chest && !back && !leg) return COLOR_OTHER;
+        int n = (chest ? 1 : 0) + (back ? 1 : 0) + (leg ? 1 : 0);
+        if (n == 1) return chest ? COLOR_CHEST : back ? COLOR_BACK : COLOR_LEG;
+        // 多部位：混合色（两色取均值，三色混合偏白，与单部位区分）
+        int r = 0, g = 0, b = 0, cnt = 0;
+        if (chest) { r += 0x4f; g += 0xc3; b += 0xf7; cnt++; }
+        if (back)  { r += 0x66; g += 0xbb; b += 0x6a; cnt++; }
+        if (leg)   { r += 0xff; g += 0xa7; b += 0x26; cnt++; }
+        r /= cnt; g /= cnt; b /= cnt;
+        if (n == 3) { // 三色混在一起会偏灰暗，提亮并加白便于与两色区分
+            r = (r + 255) / 2; g = (g + 255) / 2; b = (b + 255) / 2;
+        }
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /** 某部位最近一次训练是几天前（以"今天"= 平移4点后的日期为基准；从未练过返回 -1） */
