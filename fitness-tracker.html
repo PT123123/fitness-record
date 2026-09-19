@@ -2148,6 +2148,8 @@ let hmMonth = new Date();       // 热力图当前展示的月份
 let lastHmSync = '';            // 最近一次已同步给原生的映射串（内容没变就不重复写）
 
 function hmKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+/* 训练日归属：每天截止到早上4点（凌晨0-4点练的算前一天） */
+function hmLogical(d){ const x=new Date(d); x.setHours(x.getHours()-4); return x; }
 function hmDaysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
 
 /* 从健身笔记的 #健身日记/部位 标签汇总：日期 -> {部位:次数}（热力图数据源，与桌面控件同步） */
@@ -2157,7 +2159,7 @@ function buildDayMap(){
     if(!n || !n.createdAt) return;
     const parts=noteParts(n);
     if(!parts.length) return;
-    const d=new Date(n.createdAt);
+    const d=hmLogical(n.createdAt);
     const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     const m = map[key] || (map[key] = {});
     parts.forEach(p=>{ m[p]=(m[p]||0)+1; });
@@ -2181,7 +2183,7 @@ function hmNav(dir){
 
 /* 连续打卡天数：今天没练就从昨天往回数 */
 function hmStreak(dayMap){
-  const d=new Date();
+  const d=hmLogical(new Date());
   if(!dayMap[hmKey(d)]) d.setDate(d.getDate()-1);
   let n=0;
   while(dayMap[hmKey(d)]){ n++; d.setDate(d.getDate()-1); }
@@ -2194,7 +2196,7 @@ function renderHeatmap(){
   const dayMap=buildDayMap();
   const daysIn=hmDaysInMonth(y,m);
   const firstDow=(new Date(y,m,1).getDay()+6)%7;   // 周一起始：周一=0
-  const now=new Date();
+  const now=hmLogical(new Date());
   const isCur=(now.getFullYear()===y && now.getMonth()===m);
   const todayKey=hmKey(now);
   let trained=0, chest=0, back=0, legs=0;
@@ -2266,7 +2268,7 @@ function hmCells(y,m,dayMap,isCur,todayKey){
 function hmShowDay(date){
   const dayNotes=notes.filter(n=>{
     if(!n || !n.createdAt) return false;
-    const d=new Date(n.createdAt);
+    const d=hmLogical(n.createdAt);
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')===date;
   }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
   if(!dayNotes.length){ alert('这一天没有健身笔记'); return; }

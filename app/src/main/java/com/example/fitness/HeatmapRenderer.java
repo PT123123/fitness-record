@@ -43,15 +43,17 @@ public class HeatmapRenderer {
         float gap = 1.5f * d;
         float titleH = 15f * d;
         float headerH = 11f * d;
+        float footerH = 11f * d;
         float contentW = wPx - 2 * pad;
         float cellW = (contentW - 6 * gap) / 7f;
         float gridTop = pad + titleH + headerH;
-        float gridH = hPx - gridTop - pad;
+        float gridH = hPx - gridTop - pad - footerH;
         float cellH = (gridH - 5 * gap) / 6f;
         if (cellW <= 0 || cellH <= 0) return bmp;
 
+        // 训练日归属：每天截止到早上4点（凌晨0-4点练的算前一天），整体平移4小时判定
         Calendar cal = Calendar.getInstance();
-        cal.setTimeInMillis(nowMillis);
+        cal.setTimeInMillis(nowMillis - 4L * 60 * 60 * 1000);
         int year = cal.get(Calendar.YEAR);
         int month = cal.get(Calendar.MONTH);
         int todayDom = cal.get(Calendar.DAY_OF_MONTH);
@@ -123,7 +125,38 @@ public class HeatmapRenderer {
                 c.drawText(String.valueOf(dom), cx, cy, numPaint);
             }
         }
+
+        // 底部：各部位最近一次训练距今天数（胸/背/腿分色，与日历格子主色一致）
+        Paint footPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        footPaint.setTextSize(8.5f * d);
+        footPaint.setTextAlign(Paint.Align.CENTER);
+        fm = footPaint.getFontMetrics();
+        float footY = hPx - pad - (footerH - (fm.descent - fm.ascent)) / 2f - fm.ascent;
+        float segW = contentW / 3f;
+        String[] partNames = {"胸", "背", "腿"};
+        int[] partColors = {0xFF4fc3f7, 0xFF66bb6a, 0xFFffa726};
+        for (int i = 0; i < 3; i++) {
+            int ago = lastTrainedDaysAgo(days, partNames[i], year, month, todayDom);
+            String text = ago < 0 ? partNames[i] + " —" : partNames[i] + " " + ago + "天前";
+            footPaint.setColor(partColors[i]);
+            c.drawText(text, pad + segW * i + segW / 2f, footY, footPaint);
+        }
         return bmp;
+    }
+
+    /** 某部位最近一次训练是几天前（以"今天"= 平移4点后的日期为基准；从未练过返回 -1） */
+    private static int lastTrainedDaysAgo(Map<String, Set<String>> days, String part,
+                                          int year, int month, int todayDom) {
+        Calendar probe = Calendar.getInstance();
+        probe.clear();
+        probe.set(year, month, todayDom);
+        for (int i = 0; i < 400; i++) {
+            Set<String> parts = days.get(key(probe.get(Calendar.YEAR),
+                    probe.get(Calendar.MONTH), probe.get(Calendar.DAY_OF_MONTH)));
+            if (parts != null && parts.contains(part)) return i;
+            probe.add(Calendar.DAY_OF_MONTH, -1);
+        }
+        return -1;
     }
 
     /** 分级：0 未练；1 只练肩/腹；2/3/4 = 练到 1/2/3 个主要部位（胸背腿） */

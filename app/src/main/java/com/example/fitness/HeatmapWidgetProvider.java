@@ -70,6 +70,7 @@ public class HeatmapWidgetProvider extends AppWidgetProvider {
 
             Intent intent = new Intent(context, MainActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            intent.putExtra("openTab", "heatmap");   // 点击控件 → 打开 App 并定位到热力图页
             PendingIntent pi = PendingIntent.getActivity(context, 0, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             views.setOnClickPendingIntent(R.id.heatmap_root, pi);
