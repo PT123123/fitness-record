@@ -68,7 +68,22 @@ public class MainActivity extends Activity {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setMediaPlaybackRequiresUserGesture(false);       // 允许自动播放提示音
 
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // 桌面热力图控件点击进来：带上 openTab=heatmap，定位到热力图页
+                String tab = getIntent() == null ? null : getIntent().getStringExtra("openTab");
+                if (tab != null && !tab.isEmpty()) {
+                    String js = "window.addEventListener('load',function(){try{goTab('" + tab + "')}catch(e){}});";
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        view.evaluateJavascript(js, null);
+                    } else {
+                        view.loadUrl("javascript:" + js);
+                    }
+                }
+            }
+        });
         // 必须实现 WebChromeClient，否则 JS 的 confirm()/alert() 在 WebView 中不弹窗
         // （confirm 会直接返回 false，导致「重置计时器并导出到笔记」的确认步骤直接中止）
         web.setWebChromeClient(new WebChromeClient() {
