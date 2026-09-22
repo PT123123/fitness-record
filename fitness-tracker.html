@@ -334,6 +334,8 @@ const ACTIONS = {
   '腹':['悬挂举腿','山羊挺身','卷腹','平板支撑','悬垂提膝'],
 };
 const REST_OPTIONS = [30,45,60,90,120,150,180,240,300];
+const DUR_MIN_OPTIONS = [0,1,2,3,5,10,15,20,25,30];   // 倒计时「分」可选项
+const DUR_SEC_OPTIONS = [0,10,15,30,45];               // 倒计时「秒」可选项（含 10 秒）
 
 /* ============ 工具 ============ */
 const $=id=>document.getElementById(id);
@@ -381,6 +383,45 @@ function noteSuggestChips(curValue, onclickFn){
   return `<div class="chips" style="margin-top:8px">` + sugg.map(s=>`<span class="chip" onclick="${onclickFn(s)}">${escHtml(s)}</span>`).join('') + `</div>`;
 }
 
+/* ============ 动作预设（内置 + 历史学习，按频率排序）============ */
+/* 动作使用次数：来自历史记录 + 本次组别 */
+function actionUsageCount(){
+  const m={};
+  state.records.forEach(r=>{ const a=r.action && String(r.action).trim(); if(a) m[a]=(m[a]||0)+1; });
+  state.groups.forEach(g=>{ const a=g.action && String(g.action).trim(); if(a) m[a]=(m[a]||0)+1; });
+  return m;
+}
+/* 某部位可选的动作：内置 + 自定义（手动输入过、非本部位但有通用项），按使用频率降序 */
+function actionOptions(part){
+  const list=[];
+  (ACTIONS[part]||[]).forEach(a=>{ if(a && !list.includes(a)) list.push(a); });
+  state.customActions.forEach(c=>{
+    if(!c || !c.action) return;
+    if(part && c.part && c.part!==part) return;      // 指定部位时，只看本部位 + 无部位（通用）
+    if(!list.includes(c.action)) list.push(c.action);
+  });
+  const cnt=actionUsageCount();
+  return list.sort((a,b)=>(cnt[b]||0)-(cnt[a]||0));
+}
+/* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过） */
+function learnCustomActions(){
+  const builtin=new Set(); Object.keys(ACTIONS).forEach(p=>ACTIONS[p].forEach(a=>builtin.add(a)));
+  const has=new Set(state.customActions.map(c=>c.action));
+  const hidden=new Set(state.hiddenActions);
+  state.records.forEach(r=>{
+    const a=r.action && String(r.action).trim();
+    if(!a || builtin.has(a) || has.has(a) || hidden.has(a)) return;
+    state.customActions.push({ part:r.part||'', action:a });
+    has.add(a);
+  });
+}
+
+/* 时长下拉：把当前值也并进选项里，避免「选不到当前值时下拉框显示成 0」 */
+function durOptions(list, cur){
+  cur = parseInt(cur,10)||0;
+  return list.includes(cur) ? list : list.concat([cur]).sort((a,b)=>a-b);
+}
+
 /* ============ 状态 ============ */
 let state = {
   tab:'train',
@@ -396,6 +437,8 @@ let state = {
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t,ts}
   editingIdx:null,
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
+  customActions:[],   // 自定义动作预设 {part,action}：手动输入过的动作自动学习
+  hiddenActions:[],   // 已在设置页删除的动作（不再自动学习回来）
   exportCfg: { order:['date','time','set','part','action','reps','weight','rest','note'], off:[], delim:'comma', header:true }, // 导出记录格式：字段顺序 + 分隔符
 };
 let showManual = false;
@@ -405,6 +448,8 @@ let groupDefaults = { part:'', action:'', reps:'', weight:'' };
 
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.records) state.records=d.records; if(d.groups) state.groups=d.groups;
+  if(Array.isArray(d.customActions)) state.customActions=d.customActions;
+  if(Array.isArray(d.hiddenActions)) state.hiddenActions=d.hiddenActions;
   if(d.defaults) groupDefaults=Object.assign(groupDefaults, d.defaults);
   if(d.showManual!=null) showManual=d.showManual;
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
@@ -414,8 +459,9 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
+  learnCustomActions();   // 按历史输入补充动作预设
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg})); syncHeatmap(); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -445,12 +491,12 @@ function tick(){
   if(state.mode==='countup'){
     if(state.running) state.elapsed = now - state.startedAt;
     setTime(fmt(state.elapsed), `累计训练时长 · 已记 ${state.groups.length} 组`);
-  } else {
+  } else if(state.running){
     const passed = (now - state.startedAt)/1000;
     state.cdLeft = Math.max(0, state.cdTotal - passed);
     const passedMs = (state.cdTotal - state.cdLeft)*1000;
     setTime(fmt(state.cdLeft*1000), `倒计时剩余 · 已用时 ${fmt(passedMs)}${state.cdTotal?` / 总计 ${fmt(state.cdTotal*1000)}`:''}`);
-    if(state.cdLeft<=0 && state.running){ finishCountdown(); Native.fireFinish(state.cdTotal); }
+    if(state.cdLeft<=0){ finishCountdown(); Native.fireFinish(state.cdTotal); }
   }
 }
 function setTime(disp, sub){
@@ -565,8 +611,9 @@ function setAutoRest(on){ state.autoRest=!!on; persist(); renderTimer(); }
 function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
 function pickAction(i,a){ updateGroup(i,{action:a}); }
 function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
-function setCdMin(v){ const t=Math.max(5, parseInt(v)*60 + (state.cdTotal%60)); state.cdTotal=t; state.cdLeft=state.cdTotal; persist(); renderTimer(); }
-function setCdSec(v){ const t=Math.max(5, Math.floor(state.cdTotal/60)*60 + parseInt(v)); state.cdTotal=t; state.cdLeft=state.cdTotal; persist(); renderTimer(); }
+function cdClamp(v){ v=parseInt(v,10)||0; return Math.max(5, Math.min(3600, v)); }   // 0 秒会瞬间触发系统闹钟，故下限 5 秒
+function setCdMin(v){ state.cdTotal=cdClamp(parseInt(v,10)*60 + (state.cdTotal%60)); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
+function setCdSec(v){ state.cdTotal=cdClamp(Math.floor(state.cdTotal/60)*60 + parseInt(v,10)); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
 
 function saveGroupsToHistory(){
   const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
@@ -577,6 +624,7 @@ function saveGroupsToHistory(){
       reps:g.reps, weight:g.weight, note:g.note });
   });
   state.groups=[]; state.editingIdx=null;
+  learnCustomActions();   // 新出现的动作 → 变成动作预设
   persist(); renderTrain();
 }
 
@@ -609,7 +657,7 @@ function renderGroupEdit(i){
     <div class="field-label">部位</div>
     <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
     <div class="field-label">动作（点选预设，也可自己打）</div>
-    <div class="chips">${(ACTIONS[g.part]||[]).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
+    <div class="chips">${actionOptions(g.part).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
     <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
     <div class="row2" style="margin-top:10px">
       <div style="flex:1"><div class="field-label">次数 (RM)</div>
@@ -662,9 +710,10 @@ function renderTimerContent(){
   </div>`;
 
   if(s.mode==='countdown'){
+    const cm=Math.floor(s.cdTotal/60), cs=s.cdTotal%60;
     html+=`<div class="dur-set"><span style="color:var(--sub)">时长</span>
-      <select onchange="setCdMin(this.value)">${[0,1,2,3,5,10,15,20,25,30].map(m=>`<option ${s.cdTotal/60==m?'selected':''}>${m}</option>`).join('')}</select> 分
-      <select onchange="setCdSec(this.value)">${[0,15,30,45].map(sec=>`<option ${s.cdTotal%60==sec?'selected':''}>${sec}</option>`).join('')}</select> 秒
+      <select onchange="setCdMin(this.value)">${durOptions(DUR_MIN_OPTIONS, cm).map(m=>`<option value="${m}" ${cm===m?'selected':''}>${m}</option>`).join('')}</select> 分
+      <select onchange="setCdSec(this.value)">${durOptions(DUR_SEC_OPTIONS, cs).map(sec=>`<option value="${sec}" ${cs===sec?'selected':''}>${sec}</option>`).join('')}</select> 秒
     </div>`;
   }
 
@@ -760,7 +809,7 @@ function renderRecordSection(){
       <div class="field-label">部位</div>
       <div class="chips">${PARTS.map(p=>`<span class="chip ${d.part===p?'on':''}" onclick="recPickPart('${p}')">${p}</span>`).join('')}</div>
       <div class="field-label">动作</div>
-      <div class="chips">${(ACTIONS[d.part]||[]).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
+      <div class="chips">${actionOptions(d.part).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
       <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview()">
       <div class="row2" style="margin-top:12px">
         <div style="flex:1"><div class="field-label">次数(RM)</div>
@@ -795,7 +844,7 @@ function renderRecordSection(){
   return html;
 }
 function toggleManual(){ showManual=!showManual; persist(); renderTimer(); }
-function recPickPart(p){ recDraft.part=p; if(!(ACTIONS[p]||[]).includes(recDraft.action)) recDraft.action=''; persist(); renderTimer(); }
+function recPickPart(p){ recDraft.part=p; if(!actionOptions(p).includes(recDraft.action)) recDraft.action=''; persist(); renderTimer(); }
 function recPickAction(a){ recDraft.action=a; persist(); renderTimer(); }
 function addManual(){
   const d=recDraft;
@@ -803,6 +852,7 @@ function addManual(){
   const recTime = d.t || nowTime();
   state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual',
     part:d.part, action:d.action, rest:d.rest, reps:d.reps, weight:d.weight, note:d.note });
+  learnCustomActions();   // 手动输入的新动作 → 变成动作预设
   d.reps=''; d.weight=''; d.note=''; d.t='';   // 保留部位/动作/休息，方便连记
   persist(); renderTrain();
 }
@@ -1494,7 +1544,7 @@ function permState(){
   let notif=false;
   try{ if(window.Notification) notif = Notification.permission==='granted'; }catch(e){}
   return { native:false, notifications:notif, overlay:null, vibrate:true, sdk:0, sound:0,
-           exactAlarm:null, battery:null, fullScreen:null };
+           exactAlarm:null, battery:null, fullScreen:null, miui:false, channelOk:true };
 }
 function permBadge(ok){
   if(ok===true) return '<span class="p-state ok">已授权</span>';
@@ -1515,9 +1565,15 @@ function renderSettings(){
       </div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">锁屏 / 全屏弹窗</div>
-          <div class="p-desc">锁屏上直接弹出提醒界面；Android 14+ 需在系统通知设置里打开「全屏通知」</div></div>
+          <div class="p-desc">锁屏上直接弹出提醒界面；Android 14+ 需在系统通知设置里打开「全屏通知」，小米/红米还须允许「后台弹出界面」</div></div>
         ${permBadge(p.fullScreen)}
         ${p.fullScreen?'':'<button class="p-act" onclick="askFullScreen()">去系统设置</button>'}
+      </div>
+      <div class="perm-item">
+        <div class="p-info"><div class="p-name">训练提醒通知通道</div>
+          <div class="p-desc">通道被关闭时横幅/全屏弹窗都不出现；App 已会自动恢复，仍异常时点这里去开启</div></div>
+        ${permBadge(p.channelOk)}
+        ${p.channelOk?'':'<button class="p-act" onclick="askChannel()">去开启</button>'}
       </div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">精确闹钟（准点）</div>
@@ -1542,6 +1598,16 @@ function renderSettings(){
           <div class="p-desc">归零时震动提醒，无需申请</div></div>
         ${permBadge(true)}
       </div>
+      ${p.miui?`
+      <div style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,120,40,0.07)">
+        <div class="p-name" style="font-size:13px;font-weight:600">澎湃OS / 小米专属（锁屏弹窗必需）</div>
+        <div class="p-desc" style="font-size:12px;color:var(--sub);margin:4px 0 8px">在应用详情里开启「后台弹出界面」、允许「自启动」，并把省电策略设为「无限制」，锁屏到点才会弹出可点击的提醒页</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askOverlay()">后台弹出界面</button>
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askAutoStart()">自启动</button>
+          <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askReminderSettings()">应用详情 / 省电策略</button>
+        </div>
+      </div>`:''}
       <div class="field-label" style="margin-top:14px">闹铃声音 <span style="color:#666;font-size:12px">（15 种铃声，可按场景单独设置）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">统一铃声（点一下应用到所有场景）</div>
       <div class="chips">
@@ -1585,11 +1651,18 @@ function renderSettings(){
         <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
       </div>
     </div>
+    <div class="card">
+      <div class="field-label">动作预设 <span style="color:var(--sub);font-size:12px">（手动输入过的动作会自动学习成预设，点 ✕ 删除）</span></div>
+      ${state.customActions.length
+        ? `<div class="chips">${state.customActions.map(c=>`<span class="chip on" onclick="delCustomAction(decodeURIComponent('${pickNoteSuggEnc(c.action)}'))">${escHtml(c.action)} ✕</span>`).join('')}</div>
+           <p style="color:var(--sub);font-size:12px;margin-top:8px">删除后该动作不会再自动学习回来；在记录里手动输入仍可正常使用。</p>`
+        : `<p style="color:var(--sub);font-size:13px">还没有自定义动作。在「记录 / 手动补录」里输入过的内置以外的动作，会自动出现在这里。</p>`}
+    </div>
     <div class="card" style="background:var(--card2)">
       <div class="field-label">为什么休息结束没有系统提醒？</div>
       <p style="color:var(--sub);font-size:13px;line-height:1.7">
         ${isNative? '当前为安卓 App：倒计时期间会启动「前台服务」保活，到点由前台服务 + 系统精确闹钟双通道触发，锁屏/退后台也会提醒；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
-        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
+        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」和「后台弹出界面」（否则锁屏弹不出提醒页面）；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
         点「测试系统提醒」可立即验证整条链路。
       </p>
     </div>`;
@@ -1606,6 +1679,7 @@ function askOverlay(){
   alert('浏览器预览没有悬浮窗权限，需安装安卓 App 后在系统设置中开启');
 }
 function askFullScreen(){
+  try{ if(window.FitnessNative && window.FitnessNative.openFullScreenSettings){ window.FitnessNative.openFullScreenSettings(); return; } }catch(e){}
   try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
   alert('浏览器预览没有该系统设置，需安装安卓 App');
 }
@@ -1615,6 +1689,18 @@ function askExactAlarm(){
 }
 function askBattery(){
   try{ if(window.FitnessNative && window.FitnessNative.requestBattery){ window.FitnessNative.requestBattery(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askChannel(){
+  try{ if(window.FitnessNative && window.FitnessNative.openAppSettings){ window.FitnessNative.openAppSettings(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askAutoStart(){
+  try{ if(window.FitnessNative && window.FitnessNative.openAutoStartSettings){ window.FitnessNative.openAutoStartSettings(); return; } }catch(e){}
+  alert('浏览器预览无此设置，需安装安卓 App');
+}
+function askReminderSettings(){
+  try{ if(window.FitnessNative && window.FitnessNative.openReminderSettings){ window.FitnessNative.openReminderSettings(); return; } }catch(e){}
   alert('浏览器预览无此设置，需安装安卓 App');
 }
 function testReminder(){
@@ -1655,6 +1741,13 @@ function moveField(i,dir){
   const j=i+dir;
   if(j<0 || j>=order.length) return;
   const tmp=order[i]; order[i]=order[j]; order[j]=tmp;
+  persist(); renderSettings();
+}
+/* 删除自定义动作预设：同时记入「已删除」，避免下次按历史又学习回来 */
+function delCustomAction(name){
+  name = String(name||'').trim(); if(!name) return;
+  state.customActions = state.customActions.filter(c=>c.action!==name);
+  if(!state.hiddenActions.includes(name)) state.hiddenActions.push(name);
   persist(); renderSettings();
 }
 window.__onNativeResume = function(){ if(state.tab==='settings') renderSettings(); };

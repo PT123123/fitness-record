@@ -39,13 +39,14 @@ public class OverlayService extends Service {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
 
         view = new TextView(this);
-        view.setText("🏋️ 休息结束 · 点我去记录");
+        view.setText("🏋️ 休息结束 · 点我关闭");
         view.setBackgroundColor(0xEEEF5350);
         view.setTextColor(0xFFFFFFFF);
         view.setTextSize(18);
         view.setPadding(40, 30, 40, 30);
+        // 只关掉提醒（停铃音/震动/通知 + 移除横条），绝不写记录：要记录请用 App 里的「休息结束 · 记录这组」
         view.setOnClickListener(v -> {
-            FitnessApp.evalJs("recordRestGroup()");
+            Reminder.dismiss(this);
             stopSelf();
         });
 

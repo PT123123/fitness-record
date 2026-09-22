@@ -72,16 +72,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // 桌面热力图控件点击进来：带上 openTab=heatmap，定位到热力图页
-                String tab = getIntent() == null ? null : getIntent().getStringExtra("openTab");
-                if (tab != null && !tab.isEmpty()) {
-                    String js = "window.addEventListener('load',function(){try{goTab('" + tab + "')}catch(e){}});";
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                        view.evaluateJavascript(js, null);
-                    } else {
-                        view.loadUrl("javascript:" + js);
-                    }
-                }
+                openRequestedTab(view);   // 桌面热力图控件点击进来 → 定位到热力图页
             }
         });
         // 必须实现 WebChromeClient，否则 JS 的 confirm()/alert() 在 WebView 中不弹窗
@@ -115,6 +106,30 @@ public class MainActivity extends Activity {
         ensureNotificationPermission();
         // 启动时主动检查锁屏提醒所需权限：缺失则弹引导（延迟片刻，避免与系统权限对话框叠加）
         new Handler(Looper.getMainLooper()).postDelayed(this::ensureReminderPermissions, 1200);
+    }
+
+    /**
+     * 桌面 2x2 热力图控件点击进来：Intent 带 openTab<tab>，页面加载完成后直接切到该页。
+     * 注意：必须直接调用 goTab()，不能再挂 load 事件——onPageFinished 时 load 早已触发，监听器永远不会执行。
+     */
+    private void openRequestedTab(WebView view) {
+        Intent it = getIntent();
+        String tab = it == null ? null : it.getStringExtra("openTab");
+        if (tab == null || tab.isEmpty()) return;
+        String js = "try{ if(window.goTab) goTab('" + tab + "'); }catch(e){}";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            view.evaluateJavascript(js, null);
+        } else {
+            view.loadUrl("javascript:" + js);
+        }
+        it.removeExtra("openTab");   // 只消费一次，避免之后页面重载时再跳一次
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (web != null) openRequestedTab(web);
     }
 
     /** Android 13+ 需动态申请通知权限，否则强提醒通知不弹出 */
