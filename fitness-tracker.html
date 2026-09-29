@@ -383,15 +383,32 @@ function noteSuggestChips(curValue, onclickFn){
   return `<div class="chips" style="margin-top:8px">` + sugg.map(s=>`<span class="chip" onclick="${onclickFn(s)}">${escHtml(s)}</span>`).join('') + `</div>`;
 }
 
-/* ============ 动作预设（内置 + 历史学习，按频率排序）============ */
-/* 动作使用次数：来自历史记录 + 本次组别 */
-function actionUsageCount(){
+/* ============ 动作预设（内置 + 历史学习，按最近使用排序）============ */
+function builtinActionSet(){ const s=new Set(); Object.keys(ACTIONS).forEach(p=>ACTIONS[p].forEach(a=>s.add(a))); return s; }
+/* 记录发生时间：优先 ts，旧记录没有 ts 就按 date + t 还原 */
+function recTs(r){
+  if(r.ts) return +r.ts||0;
+  const d=String(r.date||'').match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(!d) return 0;
+  const t=String(r.t||'').match(/(\d{1,2}):(\d{2})/);
+  return new Date(+d[1], +d[2]-1, +d[3], t?+t[1]:0, t?+t[2]:0).getTime();
+}
+/* 动作最近一次使用时间：历史记录 + 本次组别 + 手动补录草稿。
+   正在编辑的组和补录草稿里的动作视为「刚刚用过」，排最前（新填的动作立刻出现在建议里） */
+function actionLastUsed(){
   const m={};
-  state.records.forEach(r=>{ const a=r.action && String(r.action).trim(); if(a) m[a]=(m[a]||0)+1; });
-  state.groups.forEach(g=>{ const a=g.action && String(g.action).trim(); if(a) m[a]=(m[a]||0)+1; });
+  const now=Date.now();
+  state.records.forEach(r=>{ const a=r.action && String(r.action).trim(); if(!a) return; const ts=recTs(r); if(ts>(m[a]||0)) m[a]=ts; });
+  state.groups.forEach((g,gi)=>{
+    const a=g.action && String(g.action).trim(); if(!a) return;
+    const ts = gi===state.editingIdx ? now : ((+g.ts)||recTs(g));
+    if(ts>(m[a]||0)) m[a]=ts;
+  });
+  const da=recDraft && recDraft.action && String(recDraft.action).trim();
+  if(da) m[da]=now;
   return m;
 }
-/* 某部位可选的动作：内置 + 自定义（手动输入过、非本部位但有通用项），按使用频率降序 */
+/* 某部位可选的动作：内置 + 自定义 + 本次会话填过的动作，按最近使用时间降序，没用过的排最后 */
 function actionOptions(part){
   const list=[];
   (ACTIONS[part]||[]).forEach(a=>{ if(a && !list.includes(a)) list.push(a); });
@@ -400,12 +417,19 @@ function actionOptions(part){
     if(part && c.part && c.part!==part) return;      // 指定部位时，只看本部位 + 无部位（通用）
     if(!list.includes(c.action)) list.push(c.action);
   });
-  const cnt=actionUsageCount();
-  return list.sort((a,b)=>(cnt[b]||0)-(cnt[a]||0));
+  // 本次组别/补录草稿里填过的动作（还没保存成预设的）也直接进建议，新填的立刻能看到
+  const sessionAdd=a=>{
+    a=String(a||'').trim();
+    if(a && !list.includes(a)) list.push(a);
+  };
+  state.groups.forEach(g=>{ if(!(part && g.part && g.part!==part)) sessionAdd(g.action); });
+  if(!(part && recDraft.part && recDraft.part!==part)) sessionAdd(recDraft.action);
+  const last=actionLastUsed();
+  return list.sort((a,b)=>(last[b]||0)-(last[a]||0));
 }
 /* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过） */
 function learnCustomActions(){
-  const builtin=new Set(); Object.keys(ACTIONS).forEach(p=>ACTIONS[p].forEach(a=>builtin.add(a)));
+  const builtin=builtinActionSet();
   const has=new Set(state.customActions.map(c=>c.action));
   const hidden=new Set(state.hiddenActions);
   state.records.forEach(r=>{
@@ -619,7 +643,7 @@ function saveGroupsToHistory(){
   const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
   if(valid.length===0){ alert('还没有填写任何组哦（至少选个动作）'); return; }
   valid.forEach(g=>{
-    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'timer',
+    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'timer', ts:Date.now(),
       part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
       reps:g.reps, weight:g.weight, note:g.note });
   });
@@ -850,7 +874,7 @@ function addManual(){
   const d=recDraft;
   if(!d.part && !d.action && !d.reps && !d.note){ alert('至少填个动作吧'); return; }
   const recTime = d.t || nowTime();
-  state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual',
+  state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual', ts:Date.now(),
     part:d.part, action:d.action, rest:d.rest, reps:d.reps, weight:d.weight, note:d.note });
   learnCustomActions();   // 手动输入的新动作 → 变成动作预设
   d.reps=''; d.weight=''; d.note=''; d.t='';   // 保留部位/动作/休息，方便连记
@@ -1652,11 +1676,15 @@ function renderSettings(){
       </div>
     </div>
     <div class="card">
-      <div class="field-label">动作预设 <span style="color:var(--sub);font-size:12px">（手动输入过的动作会自动学习成预设，点 ✕ 删除）</span></div>
-      ${state.customActions.length
-        ? `<div class="chips">${state.customActions.map(c=>`<span class="chip on" onclick="delCustomAction(decodeURIComponent('${pickNoteSuggEnc(c.action)}'))">${escHtml(c.action)} ✕</span>`).join('')}</div>
-           <p style="color:var(--sub);font-size:12px;margin-top:8px">删除后该动作不会再自动学习回来；在记录里手动输入仍可正常使用。</p>`
-        : `<p style="color:var(--sub);font-size:13px">还没有自定义动作。在「记录 / 手动补录」里输入过的内置以外的动作，会自动出现在这里。</p>`}
+      <div class="field-label">动作预设 <span style="color:var(--sub);font-size:12px">（记录里输入过的动作会自动学习成预设；可新增、改名、删除）</span></div>
+      <div class="field-label" style="font-size:12px;color:var(--sub)">＋ 新增预设</div>
+      <input class="inline-input" placeholder="输入动作名，如：臀桥" value="${escHtml(actionAddDraft)}" oninput="actionAddDraft=this.value">
+      <div class="chips" style="margin-top:8px">
+        <span class="chip ${actionAddPart===''?'on':''}" onclick="setActionAddPart('')">不限部位</span>
+        ${PARTS.map(p=>`<span class="chip ${actionAddPart===p?'on':''}" onclick="setActionAddPart('${p}')">${p}</span>`).join('')}
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="addActionPreset()">＋ 添加动作预设</button>
+      ${renderActionPresetList()}
     </div>
     <div class="card" style="background:var(--card2)">
       <div class="field-label">为什么休息结束没有系统提醒？</div>
@@ -1743,10 +1771,77 @@ function moveField(i,dir){
   const tmp=order[i]; order[i]=order[j]; order[j]=tmp;
   persist(); renderSettings();
 }
+/* 设置页「动作预设」编辑态：新增草稿 / 正在改名的行 */
+let actionAddDraft='', actionAddPart='', actionEditIdx=-1, actionEditDraft='', actionEditPart='';
+function setActionAddPart(p){ actionAddPart=p; renderSettings(); }
+function setActionEditPart(p){ actionEditPart=p; renderSettings(); }
+function addActionPreset(){
+  const name=String(actionAddDraft||'').trim();
+  if(!name){ alert('先输入动作名称'); return; }
+  if(builtinActionSet().has(name)){ alert('「'+name+'」是内置动作，无需添加'); return; }
+  if(state.customActions.some(c=>c.action===name)){ alert('「'+name+'」已在预设里'); return; }
+  const hi=state.hiddenActions.indexOf(name); if(hi>=0) state.hiddenActions.splice(hi,1);   // 之前删过 → 重新启用
+  state.customActions.unshift({ part:actionAddPart, action:name });
+  actionAddDraft='';
+  persist(); renderSettings();
+}
+function startEditAction(i){
+  const c=state.customActions[i]; if(!c) return;
+  actionEditIdx=i; actionEditDraft=c.action; actionEditPart=c.part||''; renderSettings();
+}
+function cancelEditAction(){ actionEditIdx=-1; renderSettings(); }
+function saveEditAction(){
+  const c=state.customActions[actionEditIdx];
+  if(!c){ actionEditIdx=-1; renderSettings(); return; }
+  const name=String(actionEditDraft||'').trim();
+  if(!name){ alert('名称不能为空'); return; }
+  if(name!==c.action){
+    if(builtinActionSet().has(name) || state.customActions.some(x=>x!==c && x.action===name)){
+      alert('「'+name+'」是内置动作或已有同名预设，换个名字'); return; }
+    if(!state.hiddenActions.includes(c.action)) state.hiddenActions.push(c.action);   // 旧名不再按历史学习回来
+    const hi=state.hiddenActions.indexOf(name); if(hi>=0) state.hiddenActions.splice(hi,1);
+    c.action=name;
+  }
+  c.part=actionEditPart;
+  actionEditIdx=-1;
+  persist(); renderSettings();
+}
+/* 设置页预设列表：按最近使用排序；点 ✎ 进入改名（可同时改所属部位） */
+function renderActionPresetList(){
+  if(!state.customActions.length){
+    return `<p style="color:var(--sub);font-size:13px;margin-top:8px">还没有自定义动作。在这里手动添加，或在记录里输入过的内置以外的动作会自动出现在这里。</p>`;
+  }
+  const last=actionLastUsed();
+  const rows=state.customActions.map((c,i)=>({c,i,ts:last[c.action]||0})).sort((a,b)=>b.ts-a.ts);
+  return `<div class="field-label" style="font-size:12px;color:var(--sub);margin-top:16px">已有预设（按最近使用排序，✎ 改名 / ✕ 删除）</div>
+    <div class="exp-field-list">${rows.map(({c,i})=> actionEditIdx===i ? renderActionEditRow(i) : `
+      <div class="exp-field-row">
+        <span class="exp-field-name">${escHtml(c.action)} <span style="color:var(--sub);font-size:11px">${c.part?('· '+escHtml(c.part)):'· 不限部位'}</span></span>
+        <span class="exp-field-mv">
+          <button class="btn btn-ghost" style="padding:2px 8px;margin:0 2px" onclick="startEditAction(${i})">✎ 改名</button>
+          <button class="btn btn-ghost" style="padding:2px 8px;margin:0 2px" onclick="delCustomAction(decodeURIComponent('${pickNoteSuggEnc(c.action)}'))">✕</button>
+        </span>
+      </div>`).join('')}</div>`;
+}
+function renderActionEditRow(i){
+  const partChips=[`<span class="chip ${actionEditPart===''?'on':''}" onclick="setActionEditPart('')">不限部位</span>`]
+    .concat(PARTS.map(p=>`<span class="chip ${actionEditPart===p?'on':''}" onclick="setActionEditPart('${p}')">${p}</span>`)).join('');
+  return `<div class="exp-field-row" style="flex-wrap:wrap;align-items:stretch">
+      <input class="inline-input" style="flex:1;min-width:120px" value="${escHtml(actionEditDraft)}" oninput="actionEditDraft=this.value">
+      <div class="chips" style="width:100%">${partChips}</div>
+      <div class="chips" style="width:100%">
+        <button class="btn btn-green" style="padding:6px 14px" onclick="saveEditAction()">✔ 保存</button>
+        <button class="btn btn-ghost" style="padding:6px 14px" onclick="cancelEditAction()">取消</button>
+      </div>
+    </div>`;
+}
 /* 删除自定义动作预设：同时记入「已删除」，避免下次按历史又学习回来 */
 function delCustomAction(name){
   name = String(name||'').trim(); if(!name) return;
-  state.customActions = state.customActions.filter(c=>c.action!==name);
+  const di=state.customActions.findIndex(c=>c.action===name);
+  if(di<0) return;
+  state.customActions.splice(di,1);
+  if(actionEditIdx===di) actionEditIdx=-1; else if(actionEditIdx>di) actionEditIdx--;   // 删除行后修正正在编辑的行号
   if(!state.hiddenActions.includes(name)) state.hiddenActions.push(name);
   persist(); renderSettings();
 }
