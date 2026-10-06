@@ -408,35 +408,43 @@ function actionLastUsed(){
   if(da) m[da]=now;
   return m;
 }
-/* 某部位可选的动作：内置 + 自定义 + 本次会话填过的动作，按最近使用时间降序，没用过的排最后 */
+/* 某部位可选的动作：内置 + 自定义 + 本次会话填过的动作，按最近使用时间降序，没用过的排最后。
+   指定部位时，其他部位的自定义/会话动作不再隐藏，排在末尾兜底（部位记错也能找到动作） */
 function actionOptions(part){
-  const list=[];
+  const list=[], other=[];
   (ACTIONS[part]||[]).forEach(a=>{ if(a && !list.includes(a)) list.push(a); });
-  state.customActions.forEach(c=>{
-    if(!c || !c.action) return;
-    if(part && c.part && c.part!==part) return;      // 指定部位时，只看本部位 + 无部位（通用）
-    if(!list.includes(c.action)) list.push(c.action);
-  });
-  // 本次组别/补录草稿里填过的动作（还没保存成预设的）也直接进建议，新填的立刻能看到
-  const sessionAdd=a=>{
-    a=String(a||'').trim();
-    if(a && !list.includes(a)) list.push(a);
+  const add=(a,p)=>{
+    a=String(a||'').trim(); if(!a || list.includes(a) || other.includes(a)) return;
+    if(!part || !p || p===part) list.push(a); else other.push(a);
   };
-  state.groups.forEach(g=>{ if(!(part && g.part && g.part!==part)) sessionAdd(g.action); });
-  if(!(part && recDraft.part && recDraft.part!==part)) sessionAdd(recDraft.action);
+  state.customActions.forEach(c=>add(c.action, c.part));
+  // 本次组别/补录草稿里填过的动作（还没保存成预设的）也直接进建议，新填的立刻能看到
+  state.groups.forEach(g=>add(g.action, g.part));
+  add(recDraft.action, recDraft.part);
   const last=actionLastUsed();
-  return list.sort((a,b)=>(last[b]||0)-(last[a]||0));
+  const cmp=(a,b)=>(last[b]||0)-(last[a]||0);
+  return list.sort(cmp).concat(other.sort(cmp));
 }
-/* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过） */
+/* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过）。
+   records 最新在前：每个动作只看最近一次使用——新动作按该次部位学入；
+   已有预设的部位也跟随最近一次使用（此前固定在首次部位，换部位练就找不到动作了） */
 function learnCustomActions(){
   const builtin=builtinActionSet();
-  const has=new Set(state.customActions.map(c=>c.action));
+  const idx=new Map(state.customActions.map((c,i)=>[c.action,i]));
   const hidden=new Set(state.hiddenActions);
+  const seen=new Set();
   state.records.forEach(r=>{
     const a=r.action && String(r.action).trim();
-    if(!a || builtin.has(a) || has.has(a) || hidden.has(a)) return;
-    state.customActions.push({ part:r.part||'', action:a });
-    has.add(a);
+    if(!a || seen.has(a)) return;
+    seen.add(a);
+    if(builtin.has(a) || hidden.has(a)) return;
+    const i=idx.get(a);
+    if(i==null){                      // 新动作 → 学习成预设
+      state.customActions.push({ part:r.part||'', action:a });
+      idx.set(a, state.customActions.length-1);
+    } else if(r.part && state.customActions[i].part!==r.part){
+      state.customActions[i].part=r.part;   // 部位跟随最近一次使用
+    }
   });
 }
 
@@ -649,6 +657,7 @@ function saveGroupsToHistory(){
   });
   state.groups=[]; state.editingIdx=null;
   learnCustomActions();   // 新出现的动作 → 变成动作预设
+  appendTodayTags(valid.map(g=>g.part));   // 部位标签补进当天笔记（热力图）
   persist(); renderTrain();
 }
 
@@ -877,6 +886,7 @@ function addManual(){
   state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual', ts:Date.now(),
     part:d.part, action:d.action, rest:d.rest, reps:d.reps, weight:d.weight, note:d.note });
   learnCustomActions();   // 手动输入的新动作 → 变成动作预设
+  appendTodayTags([d.part]);   // 部位标签补进当天笔记（热力图）
   d.reps=''; d.weight=''; d.note=''; d.t='';   // 保留部位/动作/休息，方便连记
   persist(); renderTrain();
 }
@@ -1019,6 +1029,13 @@ function exportToNoteAndReset(){
   const parts = [...new Set(gs.map(g=>g.part).filter(Boolean))];
   const tags = parts.length ? parts.map(p=>`#健身日记/${p}`).join(' ') : '';
   const text = `🏋️ 训练记录 · ${today()}` + (tags? '\n'+tags : '') + '\n' + '='.repeat(30) + '\n' + lines.join('\n');
+  gs.forEach(g=>{   // 组记录同时写入结构化历史：动作预设学习 / 热力图 / 历史列表都依赖 records
+    if(!(g.part || g.action || g.reps || g.note)) return;
+    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'note', ts:Date.now(),
+      part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
+      reps:g.reps, weight:g.weight, note:g.note });
+  });
+  learnCustomActions();   // 导出的动作 → 变成动作预设
   notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
   persistNotes();
   Native.cancelCountdown();
@@ -1872,6 +1889,26 @@ const HM_TAG_PREFIX = '健身日记/';
 const HM_ALL_PARTS = ['胸','背','腿','肩','腹'];
 function noteParts(n){ return extractTags(n.content).filter(t=>t.startsWith(HM_TAG_PREFIX)).map(t=>t.slice(HM_TAG_PREFIX.length)).filter(p=>HM_ALL_PARTS.includes(p)); }
 
+/* 训练保存后把部位标签补进当天笔记（热力图兜底）：已有当天的标签笔记就追加缺失部位，没有则新建一条纯标签笔记 */
+function appendTodayTags(parts){
+  parts=[...new Set((parts||[]).filter(p=>HM_ALL_PARTS.includes(p)))];
+  if(!parts.length) return;
+  const todayK=hmKey(hmLogical(new Date()));
+  const target=notes.find(n=>{
+    if(!n || !n.createdAt) return false;
+    return hmKey(hmLogical(new Date(n.createdAt)))===todayK && noteParts(n).length>0;
+  });
+  const add=parts.filter(p=>!(target && noteParts(target).includes(p)));
+  if(!add.length) return;
+  if(target){
+    target.content=(target.content.replace(/\s+$/,'')+' '+add.map(p=>'#'+HM_TAG_PREFIX+p).join(' ')).trim();
+    target.updatedAt=Date.now();
+  }else{
+    notes.unshift({ id:uid(), content:add.map(p=>'#'+HM_TAG_PREFIX+p).join(' '), pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
+  }
+  persistNotes();   // 内部已 syncHeatmap
+}
+
 /* 历史数据迁移：把旧的训练记录（每条有日期+部位）转成 #健身日记/部位 笔记，保证热力图历史不丢。
    幂等：只执行一次；若笔记里已出现任何 #健身日记/ 标签则跳过（说明用户已手动使用）。 */
 const NOTES_MIGRATED_LS = 'fitness_notes_migrated_v1';
@@ -2340,7 +2377,9 @@ function hmKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,
 function hmLogical(d){ const x=new Date(d); x.setHours(x.getHours()-4); return x; }
 function hmDaysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
 
-/* 从健身笔记的 #健身日记/部位 标签汇总：日期 -> {部位:次数}（热力图数据源，与桌面控件同步） */
+/* 热力图数据源：笔记的 #健身日记/部位 标签 + 结构化训练记录，按日期并入。
+   「保存到历史/手动补录」不产生笔记标签，只看笔记会漏掉这些训练；
+   记录只做「存在性」并入（不与标签次数相加），避免导出到笔记双写导致重复计数 */
 function buildDayMap(){
   const map = {};
   notes.forEach(n=>{
@@ -2351,6 +2390,11 @@ function buildDayMap(){
     const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     const m = map[key] || (map[key] = {});
     parts.forEach(p=>{ m[p]=(m[p]||0)+1; });
+  });
+  state.records.forEach(r=>{
+    if(!r || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.date||'')) || !HM_ALL_PARTS.includes(r.part)) return;
+    const m = map[r.date] || (map[r.date] = {});
+    if(!m[r.part]) m[r.part]=1;
   });
   return map;
 }
@@ -2425,7 +2469,7 @@ function renderHeatmap(){
       <div class="hm-stat"><b style="color:#ffa726">${legs}</b><span>腿</span></div>
     </div>
     ${streak? `<div class="hm-streak">🔥 连续打卡 ${streak} 天</div>` : ''}
-    <div style="margin-top:12px;color:var(--sub);font-size:12px">点击任意日期查看当天健身笔记 · 数据来自笔记中的 #健身日记/部位 标签 · 未练为灰格，只练肩/腹为青灰格</div>
+    <div style="margin-top:12px;color:var(--sub);font-size:12px">点击任意日期查看当天健身笔记与训练记录 · 数据来自笔记中的 #健身日记/部位 标签 + 训练记录 · 未练为灰格，只练肩/腹为青灰格</div>
   </div>`;
   $('app').innerHTML=html;
 }
@@ -2452,22 +2496,30 @@ function hmCells(y,m,dayMap,isCur,todayKey){
   return s;
 }
 
-/* 点击某天：弹层展示当天的健身笔记（带 #健身日记/部位 标签） */
+/* 点击某天：弹层展示当天的健身笔记（带 #健身日记/部位 标签）与训练记录 */
 function hmShowDay(date){
   const dayNotes=notes.filter(n=>{
     if(!n || !n.createdAt) return false;
     const d=hmLogical(n.createdAt);
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')===date;
   }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-  if(!dayNotes.length){ alert('这一天没有健身笔记'); return; }
-  const lines=dayNotes.map(n=>{
+  const dayRecs=state.records.filter(r=>r && r.date===date).sort((a,b)=>(a.t||'').localeCompare(b.t||''));
+  if(!dayNotes.length && !dayRecs.length){ alert('这一天没有健身笔记或训练记录'); return; }
+  const noteLines=dayNotes.map(n=>{
     const dots=noteParts(n).map(p=>`<span class="hm-dot-s" style="background:${HM_COLORS[p]||'#888'}"></span>`).join('');
     return `<div class="hist-item" style="cursor:pointer" onclick="closeNoteSheet();openNoteDetail('${n.id}')">
       <span class="h-body">${escHtml(noteTitle(n))}</span><span style="margin-left:6px">${dots}</span>
     </div>`;
   }).join('');
+  const recLines=dayRecs.map(r=>{
+    const dot=(r.part && HM_COLORS[r.part])? `<span class="hm-dot-s" style="background:${HM_COLORS[r.part]}"></span>` : '';
+    return `<div class="hist-item"><span class="h-time">${r.t||''}</span><span class="h-body">${escHtml(fmtRecordLine(r))}</span><span style="margin-left:6px">${dot}</span></div>`;
+  }).join('');
+  const secLabel=t=>`<div class="field-label" style="padding:4px 12px 0;font-size:12px;color:var(--sub)">${t}</div>`;
+  const body=(noteLines? secLabel('健身笔记')+noteLines : '') + (recLines? secLabel('训练记录')+recLines : '');
+  const title=[dayNotes.length? dayNotes.length+' 篇笔记':'', dayRecs.length? dayRecs.length+' 组记录':''].filter(Boolean).join(' · ');
   const el=$('action-sheet');
-  el.innerHTML=`<div class="as-head"><div class="as-title">📅 ${date} · ${dayNotes.length} 篇健身笔记</div></div><div style="max-height:60vh;overflow-y:auto">${lines}</div><button class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="closeNoteSheet()">关闭</button>`;
+  el.innerHTML=`<div class="as-head"><div class="as-title">📅 ${date} · ${title}</div></div><div style="max-height:60vh;overflow-y:auto">${body}</div><button class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="closeNoteSheet()">关闭</button>`;
   el.classList.add('show'); $('sheet-mask').classList.add('show');
 }
 
