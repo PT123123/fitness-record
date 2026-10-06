@@ -45,6 +45,34 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ---
 
+## 📦 发布（GitHub Releases · Obtainium）
+
+发布渠道就是 GitHub Releases：Obtainium 以仓库为源、从 Release 资产里抓 APK 自动更新。
+资产名固定 `fitness-record-X.Y.Z.apk`（以 `.apk` 结尾，Obtainium 可识别），tag 格式 `vX.Y.Z`，说明直接用 `dist/release-notes-X.Y.Z.md` 的内容。
+
+### 发布步骤
+1. **bump 版本号**（4 处同步改）：
+   - `version.txt` → `1.2.9`
+   - `version.js`（根目录）→ `window.APP_VERSION = "1.2.9";`，并复制到 `app/src/main/assets/version.js`
+   - `app/build.gradle` → `versionCode 129`（主次补版本号拼接的整数）+ `versionName "1.2.9"`
+   - `app/src/main/assets/index.html` 改动后记得同步根目录 `fitness-tracker.html`（两份需保持一致）
+2. **构建**：`.\gradlew.bat assembleRelease`，产物在 `app/build/outputs/apk/release/app-release.apk`
+3. **本地归档**：复制 APK 为 `dist/fitness-record-X.Y.Z.apk`，写 `dist/release-notes-X.Y.Z.md`
+4. **发 GitHub Release**（Obtainium 即刻可抓到）：
+   ```bash
+   git tag v1.2.9 && git push origin v1.2.9
+   gh release create v1.2.9 dist/fitness-record-1.2.9.apk \
+     --title "v1.2.9" --notes-file dist/release-notes-1.2.9.md
+   ```
+
+### 签名密钥库（keystore）
+- 位置在**仓库外**：`~/keystores/debug.keystore`（即 `C:/Users/ted/keystores/debug.keystore`，不受版本控制，换机器需手动拷贝，丢了就无法覆盖升级）
+- 别名 `androiddebugkey`，store/key 口令均为 `android`（配置见 `app/build.gradle` 的 `signingConfigs.release`）
+- **release 构建复用 debug 签名**：这是有意的约定（个人应用，无上架需求），保证 debug/release/Obtainium 更新三者的签名一致、可直接覆盖安装
+- 换 keystore = 所有用户必须卸载重装，非必要不要换
+
+---
+
 ## 🔐 权限说明（首次使用会引导）
 - **通知**：Android 13+ 首次启动自动弹窗申请（用于强提醒通知）。
 - **悬浮窗**：设置页一键跳转「在其他应用上层显示」开关（`SYSTEM_ALERT_WINDOW`，需手动授权，未授权时自动引导、不会崩溃）。
