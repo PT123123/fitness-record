@@ -129,6 +129,22 @@ public class FitnessNativeBridge {
         activity.pickNotesFile();
     }
 
+    /* ==================== 云备份（七牛） ==================== */
+
+    /** 上传备份：JavaBridge 线程内签名上传（dailyKey + latestKey），结果回传 window.onCloudBackupResult */
+    @JavascriptInterface
+    public void uploadBackup(String cfgJson, String payload) {
+        CloudBackup.upload(cfgJson, payload, result -> runOnUi(() ->
+                activity.evalJs("window.onCloudBackupResult && window.onCloudBackupResult(" + JSONObject.quote(result) + ")")));
+    }
+
+    /** 下载备份文本（如 latest.json），结果回传 window.onCloudRestoreResult */
+    @JavascriptInterface
+    public void downloadBackup(String cfgJson, String key) {
+        CloudBackup.download(cfgJson, key, result -> runOnUi(() ->
+                activity.evalJs("window.onCloudRestoreResult && window.onCloudRestoreResult(" + JSONObject.quote(result) + ")")));
+    }
+
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
 
     /** 返回各系统权限状态：{native,sdk,notifications,overlay,vibrate,sound,exactAlarm,battery,fullScreen,miui,channelOk} */

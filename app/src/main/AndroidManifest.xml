@@ -3,6 +3,7 @@
 
     <!-- 强提醒所需权限 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />                      <!-- 云备份（七牛）上传/下载 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />           <!-- Android 13+ 通知 -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />               <!-- 锁屏/后台准点提醒 -->

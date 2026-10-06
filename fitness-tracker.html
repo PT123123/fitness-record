@@ -523,7 +523,7 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
   learnCustomActions();   // 按历史输入补充动作预设
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); scheduleCloudBackup(); }
 
 /* 本次训练起点：第一组的时间戳（顶部走表计时用） */
 function workoutStart(){
@@ -1193,7 +1193,7 @@ function loadHiit(){ try{ const d=JSON.parse(localStorage.getItem(HIIT_LS)||'{}'
   hiit.running=false; hiit.finished=false; hiit.phase='work'; hiit.currentSet=1; hiit.currentRound=1;
   hiit.phaseLeft=hiit.workSec; hiit.timerId=null;
 }catch(e){} }
-function persistHiit(){ localStorage.setItem(HIIT_LS, JSON.stringify({sessions:hiit.sessions, workSec:hiit.workSec, restSec:hiit.restSec, roundsPerSet:hiit.roundsPerSet, sets:hiit.sets, setRestSec:hiit.setRestSec})); }
+function persistHiit(){ localStorage.setItem(HIIT_LS, JSON.stringify({sessions:hiit.sessions, workSec:hiit.workSec, restSec:hiit.restSec, roundsPerSet:hiit.roundsPerSet, sets:hiit.sets, setRestSec:hiit.setRestSec})); scheduleCloudBackup(); }
 
 function setHiitTab(t){ hiit.tab=t; renderHiit(); }
 function applyHiitPreset(i){
@@ -1450,7 +1450,7 @@ function loadStair(){ try{ const d=JSON.parse(localStorage.getItem(STAIR_LS)||'{
   stair.laps=[]; stair.lapStartAt=0; stair.lapFloors=0;
   stair.restRunning=false; stair.restDone=false; stair.restTimerId=null;
 }catch(e){} }
-function persistStair(){ localStorage.setItem(STAIR_LS, JSON.stringify({sessions:stair.sessions, weight:stair.weight, restLeft:stair.restLeft})); }
+function persistStair(){ localStorage.setItem(STAIR_LS, JSON.stringify({sessions:stair.sessions, weight:stair.weight, restLeft:stair.restLeft})); scheduleCloudBackup(); }
 function stairKcal(){ return Math.round(stair.weight * stair.floors * 0.17); }
 
 function setStairTab(t){ stair.tab=t; renderStair(); }
@@ -1718,10 +1718,12 @@ function renderSettings(){
   const kwPerm='权限 通知 锁屏 全屏 弹窗 通道 精确闹钟 电池 自启动 悬浮窗 震动 小米 澎湃 授权 提醒 后台弹出 省电 重新检查 测试系统提醒';
   const kwSound='闹铃声音 铃声 声音 场景 试听 统一铃声 提醒音 按场景设置';
   const kwExport='导出记录格式 导出 格式 分隔符 字段 字段顺序 首行 字段名 自定义分隔符';
+  const kwCloud='云备份 备份 恢复 七牛 bucket 空间 密钥 AccessKey SecretKey 区域 上传 下载 域名 自动备份 立即备份 AK SK';
   const kwHelp='帮助 常见问题 为什么 没有提醒 不提醒 排查 前台服务 勿扰';
   const kwActions='动作预设 预设 动作 新增 改名 删除 部位 学习 '+ state.customActions.map(c=>c.action).join(' ') +' '+ Object.values(ACTIONS).flat().join(' ');
   const visRemindSubs = q ? (hit(kwPerm)||hit(kwSound)) : (setTab==='remind');
   const visExport = q ? hit(kwExport) : (setTab==='export');
+  const visCloud = q ? hit(kwCloud) : (setTab==='export');
   const visHelp = q ? hit(kwHelp) : (setTab==='remind');
   const visActions = q ? hit(kwActions) : (setTab==='actions');
   const subSt = kw => (q && !hit(kw)) ? ' style="display:none"' : '';
@@ -1841,6 +1843,38 @@ function renderSettings(){
     </div>
   </div>`;
   }
+  if(visCloud){
+  html+=`<div class="card">
+    <div${subSt(kwCloud)}>
+      <div class="field-label" style="margin-top:14px">☁ 云备份（七牛） <span style="color:var(--sub);font-size:12px">（自动把全部数据备份到你的七牛云空间，防手机丢失/换机丢数据）</span></div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.7;margin-top:6px">
+        开启后：启动时（当天没传过）+ 每次改动后 1 分钟自动上传。云端文件：fitness-backup/backup-日期.json（按天留档）+ latest.json（恢复用）。备份只含训练记录/笔记/HIIT/爬楼，密钥不会上传。
+      </div>
+      <div style="margin-top:10px;font-size:14px">
+        <label><input type="checkbox" ${bkCfg.auto?'checked':''} onchange="setBkAuto(this.checked)"> 自动备份（启动时 + 改动后防抖）</label>
+      </div>
+      <div class="field-label" style="font-size:12px;color:var(--sub);margin-top:12px">七牛密钥（七牛控制台 → 个人中心 → 密钥管理）</div>
+      <input class="inline-input" data-fid="bk-ak" placeholder="AccessKey (AK)" value="${escHtml(bkCfg.ak)}" oninput="setBkField('ak',this.value)">
+      <input class="inline-input" data-fid="bk-sk" type="password" placeholder="SecretKey (SK)" value="${escHtml(bkCfg.sk)}" oninput="setBkField('sk',this.value)">
+      <div class="field-label" style="font-size:12px;color:var(--sub);margin-top:12px">空间名（对象存储 Kodo → 新建空间，建议选「私有」）</div>
+      <input class="inline-input" data-fid="bk-bucket" placeholder="如：fitness-backup" value="${escHtml(bkCfg.bucket)}" oninput="setBkField('bucket',this.value)">
+      <div class="field-label" style="font-size:12px;color:var(--sub);margin-top:12px">空间所在区域（新建空间时选择的）</div>
+      <div class="chips">
+        ${[['z0','华东'],['z1','华北'],['z2','华南'],['na0','北美'],['as0','东南亚']].map(o=>`<span class="chip ${bkCfg.region===o[0]?'on':''}" onclick="setBkRegion('${o[0]}')">${o[1]}</span>`).join('')}
+      </div>
+      <div class="field-label" style="font-size:12px;color:var(--sub);margin-top:12px">下载域名（空间「域名管理」的测试域名/自定义域名，「从云端恢复」用）</div>
+      <input class="inline-input" data-fid="bk-dldomain" placeholder="如：abc.hn-bkt.clouddn.com" value="${escHtml(bkCfg.dlDomain)}" oninput="setBkField('dlDomain',this.value)">
+      <div style="margin-top:12px;font-size:13px;color:${bkState.lastOk===false?'#e57373':'var(--sub)'}">${escHtml(bkStateLine())}</div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" style="flex:1;margin:0" onclick="doCloudBackup(true)">⬆ 立即备份</button>
+        <button class="btn btn-ghost" style="flex:1;margin:0" onclick="restoreCloudBackup()">⬇ 从云端恢复</button>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:var(--sub);line-height:1.7">
+        提示：测试域名约 30 天有效，过期后到空间「域名管理」换绑自定义域名即可，上传不受影响。
+      </div>
+    </div>
+  </div>`;
+  }
   if(visHelp){
   html+=`<div class="card" style="background:var(--card2)${subCss(kwHelp)}">
       <div class="field-label">为什么休息结束没有系统提醒？</div>
@@ -1864,7 +1898,7 @@ function renderSettings(){
       ${renderActionPresetList()}
     </div>`;
   }
-  if(q && !visRemindSubs && !visHelp && !visExport && !visActions){
+  if(q && !visRemindSubs && !visHelp && !visExport && !visCloud && !visActions){
     html+=`<div class="empty" style="margin-top:16px">没有匹配「${escHtml(setQuery)}」的设置项</div>`;
   }
   $('app').innerHTML=html;
@@ -2039,7 +2073,7 @@ let noteEditing = false;   // 笔记详情是否处于编辑模式（默认「�
 
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function loadNotes(){ try{ const d=JSON.parse(localStorage.getItem(NOTES_LS)||'[]'); if(Array.isArray(d)) notes=d; }catch(e){} }
-function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); syncHeatmap(); }
+function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); syncHeatmap(); scheduleCloudBackup(); }
 
 /* —— 健身日记部位标签：#健身日记/部位（热力图数据源） —— */
 const HM_TAG_PREFIX = '健身日记/';
@@ -2839,6 +2873,12 @@ const Native = {
   saveWorkoutSummary(json){         // 同步热力图数据给原生（桌面控件数据源）
     try{ if(window.FitnessNative && window.FitnessNative.saveWorkoutSummary) window.FitnessNative.saveWorkoutSummary(json); }catch(e){}
   },
+  uploadBackup(cfgJson, payload){   // 云备份：原生侧签名并上传（file:// 页面无法直接 fetch https）
+    try{ if(window.FitnessNative && window.FitnessNative.uploadBackup) window.FitnessNative.uploadBackup(cfgJson, payload); }catch(e){}
+  },
+  downloadBackup(cfgJson, key){     // 云恢复：原生侧签名下载文本
+    try{ if(window.FitnessNative && window.FitnessNative.downloadBackup) window.FitnessNative.downloadBackup(cfgJson, key); }catch(e){}
+  },
   requestExactAlarm(){              // 跳转「精确闹钟」授权页
     try{ if(window.FitnessNative && window.FitnessNative.requestExactAlarm) window.FitnessNative.requestExactAlarm(); }catch(e){}
   },
@@ -2867,6 +2907,98 @@ const Native = {
   }
 };
 
+/* ============ 云备份（七牛 Kodo）：启动时 + 改动后防抖自动上传 ============ */
+const BK_CFG_LS = 'fitness_backup_cfg_v1';
+const BK_STATE_LS = 'fitness_backup_state_v1';
+/* 备份只聚合这 4 个数据 key：AK/SK/备份配置/状态绝不进云端（防循环泄露） */
+const BACKUP_KEYS = ['fitness_records_v5','fitness_hiit_v2','fitness_stair_v2','fitness_notes_v1'];
+let bkCfg = { ak:'', sk:'', bucket:'', region:'z0', dlDomain:'', auto:true };
+let bkState = { lastDate:'', lastTs:0, lastOk:null, lastError:'' };   // lastOk: null=从未备份
+let cbTimer = null, cbBusy = false;
+
+function loadBackupCfg(){
+  try{ const c=JSON.parse(localStorage.getItem(BK_CFG_LS)||'{}'); if(c&&typeof c==='object') bkCfg=Object.assign(bkCfg,c); }catch(e){}
+  try{ const s=JSON.parse(localStorage.getItem(BK_STATE_LS)||'{}'); if(s&&typeof s==='object') bkState=Object.assign(bkState,s); }catch(e){}
+}
+function saveBackupCfg(){ localStorage.setItem(BK_CFG_LS, JSON.stringify(bkCfg)); }
+function saveBackupState(){ localStorage.setItem(BK_STATE_LS, JSON.stringify(bkState)); }
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function bkReady(){ return !!(bkCfg.ak && bkCfg.sk && bkCfg.bucket && window.FitnessNative && window.FitnessNative.uploadBackup); }
+
+/* 备份 payload：原样聚合 localStorage 数据 key，恢复时可直接写回（round-trip 无损） */
+function buildBackupPayload(){
+  const keys={};
+  BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) keys[k]=v; });
+  return JSON.stringify({ app:'fitness-record', ver:window.APP_VERSION||'', ts:Date.now(), keys });
+}
+
+/* 数据变更后防抖：固定 60 秒窗口（已有待传任务不重置计时，连续操作不会无限推迟） */
+function scheduleCloudBackup(){
+  if(!bkReady() || !bkCfg.auto || cbBusy || cbTimer) return;
+  cbTimer = setTimeout(()=>{ cbTimer=null; doCloudBackup(false); }, 60000);
+}
+function doCloudBackup(manual){
+  if(!bkReady()){ if(manual) alert('请先填写 AccessKey / SecretKey / 空间名（需在安卓 App 内使用）'); return; }
+  if(cbBusy){ if(manual) alert('正在备份中，请稍候'); return; }
+  cbBusy = true;
+  const cfg = Object.assign({}, bkCfg, {
+    dailyKey:  'fitness-backup/backup-'+todayStr()+'.json',
+    latestKey: 'fitness-backup/latest.json'
+  });
+  Native.uploadBackup(JSON.stringify(cfg), buildBackupPayload());
+}
+window.onCloudBackupResult = function(r){
+  cbBusy = false;
+  try{ r = (typeof r==='string')? JSON.parse(r) : r; }catch(e){}
+  if(!r) return;
+  bkState.lastTs = Date.now();
+  bkState.lastDate = todayStr();
+  bkState.lastOk = !!r.ok;
+  bkState.lastError = r.ok ? '' : String(r.error||'未知错误');
+  saveBackupState();
+  if(state.tab==='settings') renderSettings();   // 失败静默：只在设置页显示状态，不弹窗打扰
+};
+/* 启动时：自动备份开启且今天还没传过 → 上传一次当天快照 */
+function bootCloudBackup(){
+  if(bkCfg.auto && bkReady() && bkState.lastDate!==todayStr()) doCloudBackup(false);
+}
+/* 恢复：下载 latest.json → 确认 → 覆盖本地 → 调各 load() 重填内存（只写 storage 不重填会被内存态覆盖） */
+function restoreCloudBackup(){
+  if(!bkCfg.dlDomain){ alert('请先填写下载域名（七牛空间「域名管理」里的测试域名或自定义域名）'); return; }
+  if(!(window.FitnessNative && window.FitnessNative.downloadBackup)){ alert('需在安卓 App 内使用'); return; }
+  if(cbBusy){ alert('正在备份中，请稍候'); return; }
+  if(!confirm('将用云端最新备份覆盖本地的训练记录、笔记、HIIT、爬楼数据，继续？')) return;
+  cbBusy = true;
+  Native.downloadBackup(JSON.stringify(bkCfg), 'fitness-backup/latest.json');
+}
+window.onCloudRestoreResult = function(r){
+  cbBusy = false;
+  try{ r = (typeof r==='string')? JSON.parse(r) : r; }catch(e){}
+  if(!r){ alert('恢复失败：无响应'); return; }
+  if(!r.ok){ alert('恢复失败：'+(r.error||'未知错误')); if(state.tab==='settings') renderSettings(); return; }
+  try{
+    const d = JSON.parse(r.content||'null');
+    const keys = d && d.keys;
+    if(!keys){ alert('恢复失败：备份文件格式不认识'); return; }
+    let n=0;
+    BACKUP_KEYS.forEach(k=>{ if(keys[k]!=null){ localStorage.setItem(k, keys[k]); n++; } });
+    if(!n){ alert('云端备份里没有可恢复的数据'); return; }
+    load(); loadNotes(); loadHiit(); loadStair();
+    syncHeatmap(); switchTab(state.tab);   // 按当前 tab 重渲染（内存已重填，防止被覆盖回旧数据）
+    alert('已从云端恢复 ✔（'+n+' 类数据）');
+  }catch(e){ alert('恢复失败：'+((e&&e.message)||e)); }
+};
+
+/* 云备份设置项（设置 → 导出 Tab） */
+function setBkField(k, v){ bkCfg[k]=v; saveBackupCfg(); }
+function setBkRegion(r){ bkCfg.region=r; saveBackupCfg(); renderSettings(); }
+function setBkAuto(on){ bkCfg.auto=!!on; saveBackupCfg(); renderSettings(); }
+function bkStateLine(){
+  if(bkState.lastOk===true) return '✅ 上次备份 '+new Date(bkState.lastTs).toLocaleString();
+  if(bkState.lastOk===false) return '❌ 上次失败：'+bkState.lastError;
+  return '从未备份（填写配置后点「立即备份」测试）';
+}
+
 /* ============ Tab 切换 ============ */
 function switchTab(tab){
   state.tab=tab;
@@ -2886,6 +3018,8 @@ function switchTab(tab){
 /* ============ 初始化 ============ */
 function init(){
   load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
+  loadBackupCfg();
+  setTimeout(bootCloudBackup, 4000);   // 启动后稍等界面稳定再检查云备份（当天没传过才传）
   refreshSidebar();
   setInterval(updateWorkoutElapsed, 1000);   // 顶部走表：只要训练页有第一组就每秒刷新（不依赖计时器是否 running）
   const sc = Native.getSoundConfig();
