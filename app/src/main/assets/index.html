@@ -144,6 +144,7 @@
   .hist-item .h-body{ flex:1; font-size:15px; }
   .hist-item .h-tag{ display:inline-block; background:var(--chip); color:var(--acc); border-radius:6px;
     padding:1px 7px; font-size:12px; margin-right:6px; }
+  .rec-focus{ outline:2px solid var(--acc); border-radius:12px; }
   .del{ color:var(--warn); font-size:18px; padding:0 4px; background:none; border:none; }
 
   /* 导出 */
@@ -313,6 +314,7 @@
     <button data-tab="hiit" onclick="goTab('hiit')">🔥 HIIT</button>
     <button data-tab="stair" onclick="goTab('stair')">🧗 爬楼</button>
     <button data-tab="heatmap" onclick="goTab('heatmap')">📅 热力图</button>
+    <button data-tab="records" onclick="goTab('records')">📋 记录</button>
     <button data-tab="notes" onclick="goTab('notes')">📝 笔记</button>
     <button data-tab="settings" onclick="goTab('settings')">⚙ 设置</button>
   </nav>
@@ -867,10 +869,10 @@ function renderRecordSection(){
     state.records.forEach(r=>{
       if(r.date!==lastDate){ html+=`<div class="hist-date">📅 ${r.date}</div>`; lastDate=r.date; }
       const line = fmtRecordLine(r);
-      html+=`<div class="hist-item">
+      html+=`<div class="hist-item" style="cursor:pointer" onclick="openRecEdit('${r.id}')">
         <span class="h-time">${r.t}</span>
         <span class="h-body">${line}</span>
-        <button class="del" onclick="delRecord('${r.id}')">×</button>
+        <button class="del" onclick="event.stopPropagation();delRecord('${r.id}')">×</button>
       </div>`;
     });
   }
@@ -891,6 +893,71 @@ function addManual(){
   persist(); renderTrain();
 }
 function delRecord(id){ state.records=state.records.filter(r=>r.id!==id); persist(); renderTrain(); }
+
+/* —— 点击历史记录 → 弹层编辑（改完写回原记录；动作改名会自动学进预设） —— */
+let editRecId=null;
+function openRecEdit(id){
+  const r=state.records.find(x=>x.id===id); if(!r) return;
+  editRecId=id;
+  const opt=(v,label,cur)=>`<option value="${label||''}"${cur===v?' selected':''}>${label||'（不限部位）'}</option>`;
+  $('sheet-mask').classList.add('show');
+  const sheet=$('action-sheet');
+  sheet.classList.add('show');
+  sheet.innerHTML=`
+    <div class="as-head"><div class="as-title">✏️ 编辑记录</div><div class="as-sub">${escHtml(fmtRecordLine(r))}</div></div>
+    <div style="padding:2px 6px 6px">
+      <div class="field-label">日期</div>
+      <input class="inline-input" type="date" id="er-date" value="${r.date||''}">
+      <div class="field-label">时间</div>
+      <input class="inline-input" type="time" id="er-time" value="${r.t||''}">
+      <div class="field-label">部位</div>
+      <select class="inline-input" id="er-part">
+        ${opt('','',r.part)}${opt('胸','胸',r.part)}${opt('背','背',r.part)}${opt('腿','腿',r.part)}${opt('肩','肩',r.part)}${opt('腹','腹',r.part)}
+      </select>
+      <div class="field-label">动作</div>
+      <input class="inline-input" id="er-action" placeholder="窄距引体下拉" value="${escHtml(r.action||'')}">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div class="field-label">次数</div>
+          <input class="inline-input" inputmode="numeric" id="er-reps" value="${escHtml(r.reps||'')}"></div>
+        <div style="flex:1"><div class="field-label">重量(kg)</div>
+          <input class="inline-input" inputmode="decimal" id="er-weight" value="${escHtml(r.weight||'')}"></div>
+        <div style="flex:1"><div class="field-label">休息(秒)</div>
+          <input class="inline-input" inputmode="numeric" id="er-rest" value="${r.rest!==''&&r.rest!=null?r.rest:''}"></div>
+      </div>
+      <div class="field-label">笔记</div>
+      <input class="inline-input" id="er-note" value="${escHtml(r.note||'')}">
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-green" style="flex:1" onclick="saveRecEdit()">✔ 保存</button>
+        <button class="btn btn-stop" style="flex:1" onclick="editRecDelete()">🗑 删除</button>
+        <button class="btn btn-ghost" onclick="closeNoteSheet()">取消</button>
+      </div>
+    </div>`;
+}
+function saveRecEdit(){
+  const r=state.records.find(x=>x.id===editRecId); if(!r) return;
+  const g=id=>{ const el=$(id); return el? el.value.trim():''; };
+  const date=g('er-date');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ alert('日期无效'); return; }
+  r.date=date;
+  r.t=g('er-time');
+  r.part=g('er-part');
+  r.action=g('er-action');
+  r.reps=g('er-reps');
+  r.weight=g('er-weight');
+  r.rest=g('er-rest')!==''? parseInt(g('er-rest'),10):'';
+  r.note=g('er-note');
+  r.updatedAt=Date.now();
+  learnCustomActions();   // 改名的新动作自动学进预设
+  closeNoteSheet();
+  persist(); renderTrain();
+  if(state.tab==='records') renderRecordsTab();
+}
+function editRecDelete(){
+  if(!confirm('删除这条训练记录？')) return;
+  closeNoteSheet();
+  delRecord(editRecId); editRecId=null;
+  if(state.tab==='records') renderRecordsTab();
+}
 
 /* ============ 导出（每次点开自动预览；格式在「设置 → 导出记录格式」中配置：字段顺序 + 分隔符）============ */
 function collectExportItems(){
@@ -2333,6 +2400,7 @@ function renderNoteDetail(id){
     ${noteEditing
       ? `<button class="btn btn-green" onclick="toggleNoteEdit()">✔ 完成</button>`
       : `<button class="btn btn-primary" onclick="toggleNoteEdit()">✏️ 编辑</button>`}
+    <button class="btn btn-ghost" onclick="openRecordsForNote('${n.id}')">🔍 原数据</button>
     <button class="btn btn-ghost" onclick="copyNote('${n.id}')">📋 复制</button>
     <button class="btn btn-ghost" onclick="toggleNotePin('${n.id}')">${n.pinned?'📌 取消置顶':'📌 置顶'}</button>
     <button class="btn btn-stop" onclick="deleteNote('${n.id}')">🗑 删除</button>
@@ -2355,6 +2423,60 @@ function insertPartTagInEditor(p){
   if(tagsEl) tagsEl.innerHTML=extractTags(n.content).map(x=>`<span class="ntag">#${escHtml(x)}</span>`).join('');
   try{ ta.setSelectionRange(s+ins.length, s+ins.length); }catch(err){}
   ta.focus();
+}
+
+/* ============ 记录页（结构化数据只读展示，与笔记互相跳转） ============ */
+let recordFocusDate='';   // 从笔记「查看原数据」跳来时定位+高亮的日期
+/* 笔记对应的训练日期：标题行「训练记录 · YYYY-M-D[ 时间]」优先，否则按创建日期 */
+function noteDateOf(n){
+  const t=(String(n.content||'').split('\n').find(x=>x.trim())||'');
+  const m=t.match(/训练记录 ·\s*(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
+  if(n.createdAt){ const d=new Date(n.createdAt); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  return '';
+}
+function noteForDate(date){
+  return notes.find(n=>new RegExp('^🏋️ 训练记录 ·\\s*'+date).test(String(n.content||'')));
+}
+function renderRecordsTab(){
+  state.tab='records';
+  const days={};
+  state.records.forEach(r=>{ if(r&&r.date) (days[r.date]||(days[r.date]=[])).push(r); });
+  const dates=Object.keys(days).sort().reverse();
+  let html=`<div class="rec-head" style="margin-bottom:8px">
+    <span class="rh-title">📋 训练记录 <span style="color:var(--sub);font-weight:400;font-size:12px">${state.records.length} 条 · 只读</span></span>
+    <button class="rh-close" onclick="goTab('train')">返回 ✕</button>
+  </div>`;
+  if(!dates.length){ html+=`<div class="empty">还没有结构化训练记录</div>`; }
+  dates.forEach(d=>{
+    const hasNote=!!noteForDate(d);
+    html+=`<div class="hist-date" id="recd-${d}" style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+      <span>📅 ${d}</span>
+      ${hasNote?`<button class="btn btn-ghost" style="padding:2px 10px;font-size:12px" onclick="openNoteForDate('${d}')">📝 查看笔记</button>`:''}
+    </div>`;
+    days[d].forEach(r=>{
+      const dot=(r.part&&HM_COLORS[r.part])?`<span class="hm-dot-s" style="background:${HM_COLORS[r.part]}"></span>`:'';
+      html+=`<div class="hist-item"><span class="h-time">${r.t||''}</span><span class="h-body">${escHtml(fmtRecordLine(r))}</span><span style="margin-left:6px">${dot}</span></div>`;
+    });
+  });
+  $('app').innerHTML=html;
+  if(recordFocusDate){
+    const el=$('recd-'+recordFocusDate);
+    if(el){ try{ el.scrollIntoView({block:'start'}); }catch(e){} el.classList.add('rec-focus'); }
+    recordFocusDate='';
+  }
+}
+function openRecordsForNote(id){          // 笔记详情 → 查看原数据
+  const n=notes.find(x=>x.id===id); if(!n) return;
+  const d=noteDateOf(n);
+  recordFocusDate=d;
+  switchTab('records');
+  if(!d) alert('未能识别这条笔记对应的日期');
+}
+function openNoteForDate(date){           // 记录页 → 跳回当天笔记
+  const n=noteForDate(date);
+  if(n){ openNoteDetail(n.id); return; }
+  alert('这一天没有对应的训练记录笔记');
 }
 
 /* ============ 侧边栏 ============ */
@@ -2585,6 +2707,7 @@ function switchTab(tab){
   else if(tab==='hiit') renderHiit();
   else if(tab==='stair') renderStair();
   else if(tab==='heatmap') renderHeatmap();
+  else if(tab==='records') renderRecordsTab();
   else if(tab==='settings') renderSettings();
   else if(tab==='notes') renderNotes();
   refreshSidebar();
