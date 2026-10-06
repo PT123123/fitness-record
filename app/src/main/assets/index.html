@@ -155,8 +155,12 @@
   .recd-f{ display:flex; gap:8px; align-items:baseline; min-width:0; }
   .recd-k{ color:var(--sub); font-size:12px; flex:none; min-width:52px; }
   .recd-v{ color:var(--txt); font-size:14px; word-break:break-all; }
-  .recd-select{ background:var(--bg); color:var(--txt); border:1px solid var(--line);
-    border-radius:10px; padding:8px 10px; font-size:14px; width:100%; }
+  .recd-drop{ width:100%; display:flex; justify-content:space-between; align-items:center; gap:8px;
+    background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:10px;
+    padding:9px 12px; font-size:14px; }
+  .recd-drop .recd-drop-label{ flex:1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .recd-drop .recd-drop-arrow{ color:var(--sub); flex:none; }
+  .recd-drop-list{ max-height:min(52vh,380px); overflow-y:auto; }
   .del{ color:var(--warn); font-size:18px; padding:0 4px; background:none; border:none; }
 
   /* 导出 */
@@ -1703,7 +1707,7 @@ function permBadge(ok){
   if(ok===false) return '<span class="p-state no">未授权</span>';
   return '<span class="p-state no">—</span>';
 }
-let setTab='general', setQuery='';   // 设置页：当前 tab（general=通用 / actions=动作预设）+ 搜索词
+let setTab='remind', setQuery='';   // 设置页：当前 tab（remind=提醒 / export=导出 / actions=动作预设）+ 搜索词
 function setSetTab(t){ setTab=t; setQuery=''; renderSettings(); }
 function renderSettings(){
   captureFocus();
@@ -1716,18 +1720,20 @@ function renderSettings(){
   const kwExport='导出记录格式 导出 格式 分隔符 字段 字段顺序 首行 字段名 自定义分隔符';
   const kwHelp='帮助 常见问题 为什么 没有提醒 不提醒 排查 前台服务 勿扰';
   const kwActions='动作预设 预设 动作 新增 改名 删除 部位 学习 '+ state.customActions.map(c=>c.action).join(' ') +' '+ Object.values(ACTIONS).flat().join(' ');
-  const visGeneralSubs = q ? (hit(kwPerm)||hit(kwSound)||hit(kwExport)) : (setTab==='general');
-  const visHelp = q ? hit(kwHelp) : (setTab==='general');
+  const visRemindSubs = q ? (hit(kwPerm)||hit(kwSound)) : (setTab==='remind');
+  const visExport = q ? hit(kwExport) : (setTab==='export');
+  const visHelp = q ? hit(kwHelp) : (setTab==='remind');
   const visActions = q ? hit(kwActions) : (setTab==='actions');
   const subSt = kw => (q && !hit(kw)) ? ' style="display:none"' : '';
   const subCss = kw => (q && !hit(kw)) ? ';display:none' : '';
   let html=`<h2>⚙ 设置</h2>
     <input class="inline-input" data-fid="set-search" placeholder="🔍 搜索所有设置项（如：铃声 / 动作 / 通知 / 导出）" value="${escHtml(setQuery)}" oninput="setQuery=this.value;renderSettings()">
     <div class="chips" style="margin-top:8px">
-      <span class="chip ${setTab==='general'?'on':''}" onclick="setSetTab('general')">⚙ 通用</span>
+      <span class="chip ${setTab==='remind'?'on':''}" onclick="setSetTab('remind')">🔔 提醒</span>
+      <span class="chip ${setTab==='export'?'on':''}" onclick="setSetTab('export')">📤 导出</span>
       <span class="chip ${setTab==='actions'?'on':''}" onclick="setSetTab('actions')">🎯 动作预设</span>
     </div>`;
-  if(visGeneralSubs){
+  if(visRemindSubs){
   html+=`<div class="card" style="margin-top:12px">
     <div${subSt(kwPerm)}>
       <div class="field-label">系统权限检查（倒计时结束的提醒依赖以下权限）</div>
@@ -1802,6 +1808,14 @@ function renderSettings(){
         `).join('')}
       </div>
     </div>
+    <div class="btn-row" style="margin-top:14px${subCss(kwPerm)}">
+      <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
+      <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
+    </div>
+  </div>`;
+  }
+  if(visExport){
+  html+=`<div class="card">
     <div${subSt(kwExport)}>
       <div class="field-label" style="margin-top:14px">导出记录格式 <span style="color:#666;font-size:12px">（字段顺序 + 分隔符；导出页按此生成预览和复制内容）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">字段之间的分隔符</div>
@@ -1824,10 +1838,6 @@ function renderSettings(){
       <div style="margin-top:10px;font-size:14px;color:var(--txt)">
         <label><input type="checkbox" ${state.exportCfg.header?'checked':''} onchange="setHeader(this.checked)"> 首行输出字段名</label>
       </div>
-    </div>
-    <div class="btn-row" style="margin-top:14px${subCss(kwPerm)}">
-      <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
-      <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
     </div>
   </div>`;
   }
@@ -1854,7 +1864,7 @@ function renderSettings(){
       ${renderActionPresetList()}
     </div>`;
   }
-  if(q && !visGeneralSubs && !visHelp && !visActions){
+  if(q && !visRemindSubs && !visHelp && !visExport && !visActions){
     html+=`<div class="empty" style="margin-top:16px">没有匹配「${escHtml(setQuery)}」的设置项</div>`;
   }
   $('app').innerHTML=html;
@@ -2528,13 +2538,44 @@ function setRecFilter(k,v){
   }
   renderRecordsTab();
 }
+/* —— 筛选下拉：底部深色弹层（原生 select 弹窗是白底，与深色主题不搭） —— */
+let recDropFor='';
+function openRecDrop(which){
+  recDropFor=which;
+  const f=recFilter;
+  let title, cur, items;
+  if(which==='action'){
+    const acts=[...new Set(state.records.filter(r=>r&&r.action&&(!f.part||r.part===f.part)).map(r=>r.action))].sort();
+    title='选择动作'+(f.part?` · 已筛部位「${f.part}」`:'');
+    cur=f.action;
+    items=[{v:'',label:'全部动作'}].concat(acts.map(a=>({v:a,label:a})));
+  } else {
+    title='选择来源';
+    cur=f.src;
+    items=[{v:'',label:'全部来源'}].concat(Object.keys(REC_SOURCES).map(k=>({v:k,label:REC_SOURCES[k]})));
+  }
+  const sheet=$('action-sheet');
+  sheet.innerHTML=`
+    <div class="as-head">
+      <div class="as-title">${escHtml(title)}</div>
+      <div class="as-sub">共 ${items.length} 个可选项，点选即生效</div>
+    </div>
+    <div class="as-actions recd-drop-list">
+      ${items.map(it=>`<button class="btn ${String(cur)===String(it.v)?'btn-primary':'btn-ghost'}" onclick="pickRecDrop('${encodeURIComponent(it.v)}')">${escHtml(it.label)}</button>`).join('')}
+    </div>`;
+  $('sheet-mask').classList.add('show');
+  sheet.classList.add('show');
+}
+function pickRecDrop(enc){
+  closeNoteSheet();
+  setRecFilter(recDropFor, decodeURIComponent(enc));
+}
 function renderRecordsTab(){
   captureFocus();
   state.tab='records';
   const f=recFilter;
   const q=f.q.trim().toLowerCase();
   const parts=PARTS.filter(p=>state.records.some(r=>r&&r.part===p));
-  const actions=[...new Set(state.records.filter(r=>r&&r.action&&(!f.part||r.part===f.part)).map(r=>r.action))].sort();
   const list=state.records.filter(r=>{
     if(!r) return false;
     if(f.part && r.part!==f.part) return false;
@@ -2559,15 +2600,9 @@ function renderRecordsTab(){
     </div>
     <div class="row2" style="margin-top:8px">
       <div style="flex:1"><div class="field-label" style="font-size:12px;color:var(--sub)">动作</div>
-        <select class="recd-select" onchange="setRecFilter('action', this.value)">
-          <option value="">全部动作</option>
-          ${actions.map(a=>`<option value="${escHtml(a)}" ${f.action===a?'selected':''}>${escHtml(a)}</option>`).join('')}
-        </select></div>
+        <button class="recd-drop" onclick="openRecDrop('action')"><span class="recd-drop-label">${escHtml(f.action||'全部动作')}</span><span class="recd-drop-arrow">▾</span></button></div>
       <div style="flex:1"><div class="field-label" style="font-size:12px;color:var(--sub)">来源</div>
-        <select class="recd-select" onchange="setRecFilter('src', this.value)">
-          <option value="">全部来源</option>
-          ${Object.keys(REC_SOURCES).map(k=>`<option value="${k}" ${f.src===k?'selected':''}>${REC_SOURCES[k]}</option>`).join('')}
-        </select></div>
+        <button class="recd-drop" onclick="openRecDrop('src')"><span class="recd-drop-label">${escHtml(f.src?REC_SOURCES[f.src]:'全部来源')}</span><span class="recd-drop-arrow">▾</span></button></div>
     </div>
     <input class="inline-input" data-fid="recd-q" style="margin-top:8px" placeholder="🔍 搜动作 / 笔记关键词" value="${escHtml(f.q)}" oninput="setRecFilter('q', this.value)">
   </div>`;
