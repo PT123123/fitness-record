@@ -374,6 +374,9 @@ function fmtRecordLine(r){
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 function today(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+/* 训练日：与热力图同口径（hmLogical，凌晨0-4点归前一天） */
+function trainDateOfTs(ts){ const d=hmLogical(new Date(ts)); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function trainToday(){ return trainDateOfTs(Date.now()); }
 function nowTime(){ const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 /* 把 HH:MM 解析成今天的时间戳（兼容旧记录没有 ts 的情况） */
 function parseHMToTs(t){
@@ -497,6 +500,7 @@ let state = {
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t,ts}
   editingIdx:null,
   workoutStartTs:0,   // 本次训练起点（第一组的 ts）：顶部走表计时用，清空组别时归零
+  endedDate:'',       // 已「结束训练」的训练日：当天记录锁定编辑，顶部显示总结卡片
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
   customActions:[],   // 自定义动作预设 {part,action}：手动输入过的动作自动学习
   hiddenActions:[],   // 已在设置页删除的动作（不再自动学习回来）
@@ -517,13 +521,14 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.autoRest!=null) state.autoRest=!!d.autoRest;
   if(d.exportCfg) state.exportCfg=sanitizeExportCfg(d.exportCfg);
   if(d.workoutStartTs) state.workoutStartTs=d.workoutStartTs;
+  if(d.endedDate) state.endedDate=d.endedDate;
   // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
   learnCustomActions();   // 按历史输入补充动作预设
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); scheduleCloudBackup(); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, endedDate:state.endedDate, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); syncWorkoutLog(); scheduleCloudBackup(); }
 
 /* 本次训练起点：第一组的时间戳（顶部走表计时用） */
 function workoutStart(){
@@ -531,10 +536,26 @@ function workoutStart(){
 }
 function updateWorkoutElapsed(){
   const el=$('workout-elapsed'); if(!el) return;
-  const st=workoutStart();
-  if(!st){ el.style.display='none'; return; }
+  let html='';
+  const locked = (state.endedDate===trainToday());
+  if(locked){
+    /* 结束训练后：显示今日总结卡片（组数/时间段/时长/部位），替代走表 */
+    const tr = state.records.filter(r=>r && r.date===trainToday());
+    if(!tr.length){ el.style.display='none'; return; }
+    const ts=tr.map(r=>r.t).filter(Boolean).sort();
+    const a=ts[0]? parseHMToTs(ts[0]) : 0, b=ts.length? parseHMToTs(ts[ts.length-1]) : 0;
+    const m=(a && b && b>a)? Math.round((b-a)/60000) : 0;
+    const parts=[...new Set(tr.map(r=>r.part).filter(Boolean))];
+    html=`✅ 今日训练完成 · <b>${tr.length}</b> 组`
+        + (ts.length? ` · ${ts[0]}~${ts[ts.length-1]}` + (m? `（${m} 分钟）`:'') : '')
+        + (parts.length? ` · ${parts.join('、')}` : '');
+  } else {
+    const st=workoutStart();
+    if(!st){ el.style.display='none'; return; }
+    html=`⏱ 本次训练 <b>${fmt(Date.now()-st)}</b> · 已记 ${state.groups.length} 组`;
+  }
+  if(el.innerHTML!==html) el.innerHTML=html;   // 直接对比 DOM（renderTrain 重建后必须重写，不能用外部缓存）
   el.style.display='';
-  el.innerHTML=`⏱ 本次训练 <b>${fmt(Date.now()-st)}</b> · 已记 ${state.groups.length} 组`;
 }
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
@@ -694,7 +715,7 @@ function saveGroupsToHistory(){
   const valid = state.groups.filter(g=>g.part || g.action || g.reps || g.note);
   if(valid.length===0){ alert('还没有填写任何组哦（至少选个动作）'); return; }
   valid.forEach(g=>{
-    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'timer', ts:Date.now(),
+    state.records.unshift({ id:uid(), date:trainToday(), t:g.t||nowTime(), src:'timer', ts:Date.now(),
       part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
       reps:g.reps, weight:g.weight, note:g.note });
   });
@@ -905,17 +926,24 @@ function renderRecordSection(){
     html+=`<button class="btn btn-ghost" style="width:100%;margin-bottom:14px" onclick="toggleManual()">＋ 手动补录一条</button>`;
   }
 
-  html+=`<div class="section-title">记录历史</div>`;
-  if(state.records.length===0){ html+=`<div class="empty">还没有记录，去做第一组吧 💪</div>`; }
+  html+=`<div class="section-title">记录历史 <span style="color:var(--sub);font-size:12px;font-weight:400">（只显示今天，更早在 🗂 结构化数据）</span></div>`;
+  {
+    const logMiss = missingFromLog();      // 本地落盘日志里有、历史里缺的（任何日期）
+    if(logMiss.length){
+      html+=`<button class="btn btn-primary" style="width:100%;margin-bottom:10px" onclick="restoreFromLog()">📥 本地日志里有 ${logMiss.length} 条记录被删除，点击找回</button>`;
+    }
+  }
+  const todayRecs = state.records.filter(r=>r && r.date===trainToday());
+  const dayLocked = (state.endedDate===trainToday());   // 结束训练后：今天记录锁定编辑（去结构化数据改）
+  if(todayRecs.length===0){ html+=`<div class="empty">今天还没有记录，去做第一组吧 💪</div>`; }
   else {
-    let lastDate='';
-    state.records.forEach(r=>{
-      if(r.date!==lastDate){ html+=`<div class="hist-date">📅 ${r.date}</div>`; lastDate=r.date; }
+    if(dayLocked) html+=`<div style="color:var(--sub);font-size:12px;margin:-4px 2px 8px">🔒 已结束训练，今天的记录不可编辑（要改去「🗂 结构化数据」）</div>`;
+    todayRecs.forEach(r=>{
       const line = fmtRecordLine(r);
-      html+=`<div class="hist-item" style="cursor:pointer" onclick="openRecEdit('${r.id}')">
+      html+=`<div class="hist-item">
         <span class="h-time">${r.t}</span>
         <span class="h-body">${line}</span>
-        <button class="del" onclick="event.stopPropagation();delRecord('${r.id}')">×</button>
+        ${dayLocked? '' : `<button class="del" style="color:var(--acc2)" onclick="openRecEdit('${r.id}')">✏️</button>`}
       </div>`;
     });
   }
@@ -933,14 +961,20 @@ function addManual(){
   const d=recDraft;
   if(!d.part && !d.action && !d.reps && !d.note){ alert('至少填个动作吧'); return; }
   const recTime = d.t || nowTime();
-  state.records.unshift({ id:uid(), date:today(), t:recTime, src:'manual', ts:Date.now(),
+  state.records.unshift({ id:uid(), date:trainToday(), t:recTime, src:'manual', ts:Date.now(),
     part:d.part, action:d.action, rest:d.rest, reps:d.reps, weight:d.weight, note:d.note });
   learnCustomActions();   // 手动输入的新动作 → 变成动作预设
   appendTodayTags([d.part]);   // 部位标签补进当天笔记（热力图）
   d.reps=''; d.weight=''; d.note=''; d.t='';   // 保留部位/动作/休息，方便连记
   persist(); renderTrain();
 }
-function delRecord(id){ state.records=state.records.filter(r=>r.id!==id); persist(); renderTrain(); }
+function delRecord(id, skipConfirm){ if(!skipConfirm && !confirm('删除这条训练记录？')) return;
+  const r = state.records.find(x=>x&&x.id===id);
+  if(r){ // 墓碑：故意删除的记录写删除标记，日志找回不再提示（误删仍可从日志找回）
+    try{ Native.appendWorkoutLog(JSON.stringify({tomb:id, date:r.date, t:r.t, action:r.action, ts:Date.now()}));
+      logCache = logCache.filter(x=>x.id!==id); tombSet.add(id); }catch(e){}
+  }
+  state.records=state.records.filter(x=>x.id!==id); persist(); renderTrain(); }
 
 /* —— 点击历史记录 → 弹层编辑（改完写回原记录；动作改名会自动学进预设） —— */
 let editRecId=null;
@@ -1003,7 +1037,7 @@ function saveRecEdit(){
 function editRecDelete(){
   if(!confirm('删除这条训练记录？')) return;
   closeNoteSheet();
-  delRecord(editRecId); editRecId=null;
+  delRecord(editRecId, true); editRecId=null;
   if(state.tab==='records') renderRecordsTab();
 }
 
@@ -1012,7 +1046,7 @@ function collectExportItems(){
   const items=[];
   state.groups.forEach((g,i)=>{
     if(!(g.part||g.action||g.reps||g.note)) return;
-    items.push({ date:today(), set:i+1, t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight==null? '' : g.weight, note:g.note||'' });
+    items.push({ date:trainToday(), set:i+1, t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight==null? '' : g.weight, note:g.note||'' });
   });
   state.records.forEach(r=> items.push({ date:r.date, set:'', t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight==null? '' : r.weight, note:r.note||'' }));
   return items;
@@ -1115,51 +1149,66 @@ function renderExportContent(){
       <p style="color:var(--sub);font-size:14px">当前格式：${fmtExportCfg()} 可在「设置 → 导出记录格式」中修改。</p>
       <pre id="export-text">${escHtml(txt)}</pre>
       <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
-      <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="exportToNoteAndReset()">🔄 重置计时器并导出到笔记</button>
+      <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="endTraining()">🏁 结束训练</button>
+      <p style="color:var(--sub);font-size:12px;margin:8px 0 0">结束训练后：今天的记录锁定编辑（要改去「🗂 结构化数据」），训练页顶部显示今日总结。</p>
     </div>`;
 }
-/* 导出到笔记：把当前计时器里的组记录写入一条笔记，然后重置计时器 */
-function exportToNoteAndReset(){
-  if(state.groups.length===0){ alert('计时器里还没有记任何组，先点「＋ 记一组」吧'); return; }
-  if(!confirm('确认把本次训练导出到笔记，并重置计时器？\n导出后计时器与本次组别将被清空。')) return;
+/* 结束训练：草稿组转入历史 → 导出「今天的全部结构化记录 + 当日笔记」到笔记页 → 清空计时器/草稿 → 锁定今天编辑 */
+function endTraining(){
+  const todayRecs = state.records.filter(r=>r && r.date===trainToday());
+  if(state.groups.length===0 && todayRecs.length===0){ alert('今天还没有任何记录'); return; }
+  /* 重复导出检测：今天（训练日）已导出过的训练记录笔记 */
+  const reTR=/^🏋️ 训练记录 ·/;
+  const dupNotes = notes.filter(n=> reTR.test(String(n&&n.content||'')) && trainDateOfTs(n.createdAt||0)===trainToday());
+  if(!confirm('确认结束今天的训练？\n1. 本次草稿组转入结构化历史\n2. 导出今天的全部记录与笔记到笔记页\n3. 计时器/走表/草稿清空\n4. 今天的记录锁定编辑（要改去「🗂 结构化数据」）'
+      + (dupNotes.length? `\n\n⚠️ 今天已导出过 ${dupNotes.length} 条训练记录笔记，本次将带 ⚠️ 标记；建议之后去笔记页删除/合并旧的，避免重复。` : ''))) return;
   const gs = state.groups;
-  const firstTs = gs[0].ts || parseHMToTs(gs[0].t);
-  const lastTs  = gs[gs.length-1].ts || parseHMToTs(gs[gs.length-1].t);
-  const durMs = (firstTs && lastTs && lastTs>=firstTs) ? lastTs-firstTs : 0;
-  const lines=[];
-  lines.push('开始记录：' + fmtT(firstTs));
-  lines.push('最后一组：' + fmtT(lastTs));
-  lines.push('训练时长：' + fmt(durMs));
-  lines.push('组数：' + gs.length + ' 组');
-  gs.forEach((g,i)=>{
-    if(g.part || g.action || g.reps || g.weight || g.note){
-      lines.push((i+1) + '. ' + fmtRecordLine({
-        part:g.part, action:g.action, reps:g.reps, weight:g.weight,
-        rest:g.rest!=null? g.rest : Math.round(g.split/1000), note:g.note
-      }));
-    } else {
-      lines.push((i+1) + '. 第' + (i+1) + '组 · ' + (g.t||'') + ' · +' + fmt(g.split));
-    }
-  });
-  const parts = [...new Set(gs.map(g=>g.part).filter(Boolean))];
-  const tags = parts.length ? parts.map(p=>`#健身日记/${p}`).join(' ') : '';
-  const text = `🏋️ 训练记录 · ${today()}` + (tags? '\n'+tags : '') + '\n' + '='.repeat(30) + '\n' + lines.join('\n');
-  gs.forEach(g=>{   // 组记录同时写入结构化历史：动作预设学习 / 热力图 / 历史列表都依赖 records
+  gs.forEach(g=>{   // 草稿组转入结构化历史：动作预设学习 / 热力图 / 历史列表都依赖 records
     if(!(g.part || g.action || g.reps || g.note)) return;
-    state.records.unshift({ id:uid(), date:today(), t:g.t||nowTime(), src:'note', ts:Date.now(),
+    state.records.unshift({ id:uid(), date:trainToday(), t:g.t||nowTime(), src:'note', ts:Date.now(),
       part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
       reps:g.reps, weight:g.weight, note:g.note });
   });
   learnCustomActions();   // 导出的动作 → 变成动作预设
+  /* 导出今天的全部结构化记录（不只本次草稿），按时间正序 */
+  const all = state.records.filter(r=>r && r.date===trainToday());
+  all.sort((a,b)=> String(a.t||'').localeCompare(String(b.t||'')));
+  const times = all.map(r=>r.t).filter(Boolean).sort();
+  const firstTs = times[0]? parseHMToTs(times[0]) : 0;
+  const lastTs  = times.length? parseHMToTs(times[times.length-1]) : 0;
+  const durMs = (firstTs && lastTs && lastTs>=firstTs) ? lastTs-firstTs : 0;
+  const lines=[];
+  lines.push('首组：' + (times[0]||'--'));
+  lines.push('末组：' + (times[times.length-1]||'--'));
+  lines.push('训练时长：' + fmt(durMs));
+  lines.push('组数：' + all.length + ' 组');
+  all.forEach((r,i)=> lines.push((i+1) + '. ' + (r.t? r.t+' ' : '') + fmtRecordLine(r)));   // 每行带该组时间：笔记自含精确时间，后续解析无需倒推
+  /* 当日笔记区块：今天新建/编辑过的、非训练记录类笔记 */
+  const dayNotes = notes.filter(n=>{
+    const c=String(n && n.content||'');
+    if(!c.trim() || c.startsWith('🏋️ 训练记录 ·')) return false;
+    const d=new Date(n.updatedAt||n.createdAt||0);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')===trainToday();
+  });
+  if(dayNotes.length){
+    lines.push('―'.repeat(14) + ' 📝 当日笔记 ' + '―'.repeat(14));
+    dayNotes.forEach(n=> lines.push(String(n.content).trim()));
+  }
+  const parts = [...new Set(all.map(r=>r.part).filter(Boolean))];
+  const tags = parts.length ? parts.map(p=>`#健身日记/${p}`).join(' ') : '';
+  const dupMark = dupNotes.length? ' ⚠️ 今日重复导出（本条为最新，建议删除/合并旧的）' : '';
+  const text = `🏋️ 训练记录 · ${today()}` + dupMark + (tags? '\n'+tags : '') + '\n' + '='.repeat(30) + '\n' + lines.join('\n');
   notes.unshift({ id:uid(), content:text, pinned:false, createdAt:Date.now(), updatedAt:Date.now() });
   persistNotes();
+  if(dupNotes.length) setTimeout(()=>alert(`⚠️ 本次导出与今天已有的 ${dupNotes.length} 条训练记录笔记重复，已带 ⚠️ 标记。\n建议去笔记页删除或合并旧的重复笔记。`), 100);
   Native.cancelCountdown();
   state.running=false; clearInterval(timerId);
   state.groups=[]; state.editingIdx=null; state.workoutStartTs=0;
   state.elapsed=0; state.lastLapAt=0; state.cdLeft=state.cdTotal;
+  state.endedDate = trainToday();   // 锁定今天的记录编辑，顶部显示总结卡片
   persist();
   renderTrain();
-  alert('已导出到笔记并重置计时器 ✔');
+  alert(`已导出（${all.length} 条记录${dayNotes.length? ' + '+dayNotes.length+' 条笔记':''}）并结束今天的训练 ✔`);
   switchTab('notes');
 }
 function copyExport(){ const t=$('export-text').textContent;
@@ -1290,7 +1339,7 @@ function hiitFinish(){
   Native.cancelCountdown();
   hiit.totalElapsed = Date.now() - hiit.startAt;
   hiit.sessions.unshift({
-    date:today(), t:nowTime(),
+    date:trainToday(), t:nowTime(),
     work:hiit.workSec, rest:hiit.restSec,
     rounds:hiit.roundsPerSet, sets:hiit.sets, setRest:hiit.setRestSec,
     duration:hiit.totalElapsed,
@@ -1519,7 +1568,7 @@ function stairFinish(){
   stair.elapsed = Date.now() - stair.startedAt;
   stairCancelRest();
   stair.sessions.unshift({
-    date:today(), t:nowTime(), duration:stair.elapsed,
+    date:trainToday(), t:nowTime(), duration:stair.elapsed,
     floors:stair.floors, laps:stair.laps.length, kcal:stairKcal(),
   });
   persistStair();
@@ -2202,14 +2251,22 @@ function renderNoteList(){
     html+=`<div class="empty" style="padding:30px 18px">${notes.length===0?'还没有笔记':'没有匹配的笔记'}<br>
       <span style="font-size:13px;color:var(--sub)">${notes.length===0?'在下方输入框写一条，点「发送」保存<br>输入 # 可添加标签，支持搜索 / 标签筛选 / 排序 / 多选':''}</span></div>`;
   } else {
+    /* 重复导出检测：同一训练日多条「🏋️ 训练记录」笔记 → 除最新一条外都标记 ⚠️（notes 新在前） */
+    const reTR=/^🏋️ 训练记录 ·/;
+    const trByDay={};
+    notes.forEach(n=>{ if(n && reTR.test(String(n.content||''))){ const k=trainDateOfTs(n.createdAt||0); (trByDay[k]||(trByDay[k]=[])).push(n); } });
+    const staleDup=new Set();
+    Object.values(trByDay).forEach(arr=>{ if(arr.length>1) arr.slice(1).forEach(n=>staleDup.add(n.id)); });
     list.forEach(n=>{
       const t=noteTitle(n), pv=notePreview(n), ts=extractTags(n.content), sel=noteSelSet.has(n.id);
-      html+=`<div class="note-item${sel?' sel':''}" style="margin-bottom:10px">
+      const dup=staleDup.has(n.id);
+      html+=`<div class="note-item${sel?' sel':''}" style="margin-bottom:10px${dup?';border-color:var(--warn)':''}">
         <div class="group-head" onclick="onNoteCardTap('${n.id}')">
           ${noteMsel?`<span class="note-chk${sel?' on':''}" onclick="event.stopPropagation();toggleNoteSel('${n.id}')">${sel?'✓':''}</span>`:''}
-          <span class="gidx" style="min-width:0;flex:1;color:var(--txt)">${escHtml(t)}</span>
+          <span class="gidx" style="min-width:0;flex:1;color:var(--txt)">${escHtml(t)}${dup?' ⚠️':''}</span>
           <span class="gtime">${n.pinned?'📌 ':''}${fmtNoteTime(n.updatedAt)}</span>
         </div>
+        ${dup?`<div style="padding:0 14px;color:var(--warn);font-size:12px">⚠️ 与同日其他导出重复，建议删除或合并本条</div>`:''}
         ${pv?`<div class="npv">${escHtml(pv)}</div>`:''}
         ${ts.length?`<div class="ntags">${ts.map(x=>`<span class="ntag">#${escHtml(x)}</span>`).join('')}</div>`:''}
       </div>`;
@@ -2604,12 +2661,8 @@ function pickRecDrop(enc){
   closeNoteSheet();
   setRecFilter(recDropFor, decodeURIComponent(enc));
 }
-function renderRecordsTab(){
-  captureFocus();
-  state.tab='records';
-  const f=recFilter;
-  const q=f.q.trim().toLowerCase();
-  const parts=PARTS.filter(p=>state.records.some(r=>r&&r.part===p));
+function filteredRecordDates(){   // 当前筛选条件下的日期分组（渲染与「展开全部」共用）
+  const f=recFilter; const q=f.q.trim().toLowerCase();
   const list=state.records.filter(r=>{
     if(!r) return false;
     if(f.part && r.part!==f.part) return false;
@@ -2621,8 +2674,28 @@ function renderRecordsTab(){
   const days={};
   list.forEach(r=>{ if(r&&r.date) (days[r.date]||(days[r.date]=[])).push(r); });
   const dates=Object.keys(days).sort().reverse();
+  return {list, days, dates};
+}
+let openRecDates = new Set();   // 已展开的日期（默认全部收起，只显示摘要）
+function toggleRecDate(d){
+  if(openRecDates.has(d)) openRecDates.delete(d); else openRecDates.add(d);
+  renderRecordsTab();
+}
+function toggleAllRecDates(){
+  const {dates}=filteredRecordDates();
+  const allOpen = dates.length && dates.every(d=>openRecDates.has(d));
+  openRecDates = allOpen? new Set() : new Set(dates);
+  renderRecordsTab();
+}
+function renderRecordsTab(){
+  captureFocus();
+  state.tab='records';
+  const f=recFilter;
+  if(recordFocusDate) openRecDates.add(recordFocusDate);   // 从笔记跳转聚焦时自动展开该天
+  const {list, days, dates}=filteredRecordDates();
+  const parts=PARTS.filter(p=>state.records.some(r=>r&&r.part===p));
   let html=`<div class="rec-head" style="margin-bottom:8px">
-    <span class="rh-title">🗂 结构化数据 <span style="color:var(--sub);font-weight:400;font-size:12px">${list.length}/${state.records.length} 条 · 只读</span></span>
+    <span class="rh-title">🗂 结构化数据 <span style="color:var(--sub);font-weight:400;font-size:12px">${list.length}/${state.records.length} 条 · 点记录可编辑</span></span>
     <button class="rh-close" onclick="goTab('train')">返回 ✕</button>
   </div>`;
   /* —— 维度筛选区（每个字段一个维度，为空的记录在「全部」里保留）—— */
@@ -2640,17 +2713,42 @@ function renderRecordsTab(){
     </div>
     <input class="inline-input" data-fid="recd-q" style="margin-top:8px" placeholder="🔍 搜动作 / 笔记关键词" value="${escHtml(f.q)}" oninput="setRecFilter('q', this.value)">
   </div>`;
+  const filterActive = !!(f.part||f.action||f.src||f.q.trim());   // 有筛选时自动全部展开，否则匹配项会被收起
   if(!dates.length){ html+=`<div class="empty">${state.records.length? '没有匹配筛选条件的记录' : '还没有结构化训练记录'}</div>`; }
+  if(dates.length>1 && !filterActive){
+    const allOpen = dates.every(d=>openRecDates.has(d));
+    html+=`<div style="text-align:right;margin-top:8px"><button class="btn btn-ghost" style="padding:2px 10px;font-size:12px" onclick="toggleAllRecDates()">${allOpen?'⇱ 收起全部':'⇲ 展开全部'}</button></div>`;
+  }
   const fld=(k,v,span)=>`<div class="recd-f"${span?' style="grid-column:1/-1"':''}><span class="recd-k">${k}</span><span class="recd-v">${v}</span></div>`;
   dates.forEach(d=>{
     const hasNote=!!noteForDate(d);
-    html+=`<div class="hist-date" id="recd-${d}" style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
-      <span>📅 ${d}</span>
-      ${hasNote?`<button class="btn btn-ghost" style="padding:2px 10px;font-size:12px" onclick="openNoteForDate('${d}')">📝 查看笔记</button>`:''}
+    const dayRecs = days[d];
+    const open = openRecDates.has(d) || filterActive;
+    /* 收起时的摘要：部位（色点）· 组数 · 训练时间段与时长 */
+    const ps=[...new Set(dayRecs.map(r=>r.part).filter(Boolean))];
+    const psHtml=ps.map(p=>`${(p&&HM_COLORS[p])?`<span class="hm-dot-s" style="background:${HM_COLORS[p]}"></span>`:''}${escHtml(p)}`).join('、');
+    const tsAll=dayRecs.map(r=>r.t).filter(Boolean).sort();
+    let durHtml='';
+    if(tsAll.length){
+      const a=parseHMToTs(tsAll[0]), b=parseHMToTs(tsAll[tsAll.length-1]);
+      const m=Math.round((b-a)/60000);
+      durHtml = m>0? `${tsAll[0]}~${tsAll[tsAll.length-1]} · ${m}分钟` : tsAll[0];
+    }
+    /* 疑似重复记录：全字段完全相同（含时间）的多条——连续同参数组时间不同不误伤 */
+    const sig=r=>[r.t,r.part,r.action,r.reps,r.weight,r.rest,r.note,r.src].join('|');
+    const sigCnt={};
+    dayRecs.forEach(r=>{ const k=sig(r); sigCnt[k]=(sigCnt[k]||0)+1; });
+    const dupCnt=Object.values(sigCnt).reduce((s,c)=>s+Math.max(0,c-1),0);
+    html+=`<div class="hist-date" id="recd-${d}" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleRecDate('${d}')">
+      <span style="min-width:0">${open?'▾':'▸'} 📅 ${d}
+        <span style="display:block;font-size:12px;color:var(--sub);font-weight:400;margin-left:18px">${psHtml||'—'} · ${dayRecs.length} 组${durHtml? ' · '+durHtml : ''}${dupCnt? ` · <span style="color:var(--warn)">⚠️ 疑似重复 ${dupCnt} 条，建议删除/合并</span>` : ''}</span>
+      </span>
+      ${hasNote?`<button class="btn btn-ghost" style="padding:2px 10px;font-size:12px;flex-shrink:0" onclick="event.stopPropagation();openNoteForDate('${d}')">📝 查看笔记</button>`:''}
     </div>`;
-    days[d].forEach(r=>{
+    if(!open) return;
+    dayRecs.forEach(r=>{
       const dot=(r.part&&HM_COLORS[r.part])?`<span class="hm-dot-s" style="background:${HM_COLORS[r.part]}"></span>`:'';
-      html+=`<div class="recd-item">
+      html+=`<div class="recd-item" style="cursor:pointer" onclick="openRecEdit('${r.id}')">
         ${fld('时间', escHtml(r.t||''))}
         ${fld('部位', dot+escHtml(r.part||''))}
         ${fld('动作', escHtml(r.action||''), true)}
@@ -2879,6 +2977,13 @@ const Native = {
   downloadBackup(cfgJson, key){     // 云恢复：原生侧签名下载文本
     try{ if(window.FitnessNative && window.FitnessNative.downloadBackup) window.FitnessNative.downloadBackup(cfgJson, key); }catch(e){}
   },
+  appendWorkoutLog(line){           // 本地落盘日志：每次新增记录立刻追加（只增不删，误删兜底）
+    try{ if(window.FitnessNative && window.FitnessNative.appendWorkoutLog) window.FitnessNative.appendWorkoutLog(line); }catch(e){}
+  },
+  readWorkoutLog(){                 // 读全部日志行（找回比对用）
+    try{ if(window.FitnessNative && window.FitnessNative.readWorkoutLog) return window.FitnessNative.readWorkoutLog()||''; }catch(e){}
+    return '';
+  },
   requestExactAlarm(){              // 跳转「精确闹钟」授权页
     try{ if(window.FitnessNative && window.FitnessNative.requestExactAlarm) window.FitnessNative.requestExactAlarm(); }catch(e){}
   },
@@ -2917,10 +3022,31 @@ let bkState = { lastDate:'', lastTs:0, lastOk:null, lastError:'' };   // lastOk:
 let cbTimer = null, cbBusy = false;
 
 function loadBackupCfg(){
-  try{ const c=JSON.parse(localStorage.getItem(BK_CFG_LS)||'{}'); if(c&&typeof c==='object') bkCfg=Object.assign(bkCfg,c); }catch(e){}
+  try{
+    const c=JSON.parse(localStorage.getItem(BK_CFG_LS)||'{}');
+    if(c&&typeof c==='object'){
+      /* akEnc/skEnc：密文存储（Java AES-GCM）。旧版本明文残留 → 解出后立刻升级为密文 */
+      const hasEnc = c.akEnc!=null || c.skEnc!=null;
+      if(hasEnc && window.FitnessNative && FitnessNative.decryptData){
+        try{ c.ak=FitnessNative.decryptData(c.akEnc)||''; c.sk=FitnessNative.decryptData(c.skEnc)||''; }catch(e){}
+      }
+      delete c.akEnc; delete c.skEnc;
+      const legacyPlain = !!c.ak || !!c.sk;
+      bkCfg=Object.assign(bkCfg,c);
+      if(legacyPlain) saveBackupCfg();
+    }
+  }catch(e){}
   try{ const s=JSON.parse(localStorage.getItem(BK_STATE_LS)||'{}'); if(s&&typeof s==='object') bkState=Object.assign(bkState,s); }catch(e){}
 }
-function saveBackupCfg(){ localStorage.setItem(BK_CFG_LS, JSON.stringify(bkCfg)); }
+function saveBackupCfg(){
+  /* 有原生加密桥时 AK/SK 只存密文；无桥（网页调试环境）退回明文 */
+  let store;
+  if(window.FitnessNative && FitnessNative.encryptData){
+    store=Object.assign({}, bkCfg, {akEnc:FitnessNative.encryptData(bkCfg.ak||''), skEnc:FitnessNative.encryptData(bkCfg.sk||'')});
+    delete store.ak; delete store.sk;
+  } else store=bkCfg;
+  localStorage.setItem(BK_CFG_LS, JSON.stringify(store));
+}
 function saveBackupState(){ localStorage.setItem(BK_STATE_LS, JSON.stringify(bkState)); }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function bkReady(){ return !!(bkCfg.ak && bkCfg.sk && bkCfg.bucket && window.FitnessNative && window.FitnessNative.uploadBackup); }
@@ -2999,6 +3125,52 @@ function bkStateLine(){
   return '从未备份（填写配置后点「立即备份」测试）';
 }
 
+/* ============ 本地落盘日志（append-only）：每次新增记录立刻追加原生文件，删除/编辑永不触碰 ============ */
+let logSeen = new Set();    // 已写入日志的记录 id
+let logCache = [];          // 日志行缓存（找回比对用）
+let tombSet = new Set();    // 被故意删除的记录 id（墓碑），找回比对时排除
+function initWorkoutLog(){
+  logSeen = new Set();
+  logCache = [];
+  tombSet = new Set();
+  Native.readWorkoutLog().split('\n').forEach(line=>{
+    const t=line.trim(); if(!t) return;
+    try{ const o=JSON.parse(t); if(o && o.tomb){ tombSet.add(o.tomb); } else if(o){ logCache.push(o); } }catch(e){}
+  });
+  /* 启动补全：records 里有而日志缺的（首次升级/外部写入），立即补写——存量记录同样受日志保护 */
+  const have = new Set(logCache.map(r=>r && r.id).filter(Boolean));
+  state.records.forEach(r=>{
+    if(r && r.id){
+      if(!have.has(r.id)){
+        try{ Native.appendWorkoutLog(JSON.stringify(r)); logCache.push(JSON.parse(JSON.stringify(r))); }catch(e){}
+      }
+      logSeen.add(r.id);
+    }
+  });
+}
+function syncWorkoutLog(){   // persist 时 diff：只把新增记录追加进日志（幂等，不重复写）
+  if(!(window.FitnessNative && window.FitnessNative.appendWorkoutLog)) return;
+  state.records.forEach(r=>{
+    if(r && r.id && !logSeen.has(r.id)){
+      logSeen.add(r.id);
+      try{ Native.appendWorkoutLog(JSON.stringify(r)); logCache.push(JSON.parse(JSON.stringify(r))); }catch(e){}
+    }
+  });
+}
+function missingFromLog(){   // 日志里有、当前历史里没有的（误删找回候选）；故意删除的（墓碑）不算
+  const ids = new Set(state.records.map(r=>r && r.id).filter(Boolean));
+  return logCache.filter(r=>r && r.id && !ids.has(r.id) && !tombSet.has(r.id));
+}
+function restoreFromLog(){
+  const miss = missingFromLog();
+  if(!miss.length){ alert('本地日志里没有可找回的记录'); return; }
+  if(!confirm(`本地日志里有 ${miss.length} 条记录不在历史中，补回？（按 id 去重，不会重复）`)) return;
+  miss.forEach(r=>{ state.records.unshift(JSON.parse(JSON.stringify(r))); logSeen.add(r.id); });
+  learnCustomActions();
+  persist(); renderTrain();
+  alert(`已从本地日志找回 ${miss.length} 条 ✔`);
+}
+
 /* ============ Tab 切换 ============ */
 function switchTab(tab){
   state.tab=tab;
@@ -3018,6 +3190,7 @@ function switchTab(tab){
 /* ============ 初始化 ============ */
 function init(){
   load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
+  initWorkoutLog();   // 落盘日志：历史记录全量入册，此后每次新增立即追加
   loadBackupCfg();
   setTimeout(bootCloudBackup, 4000);   // 启动后稍等界面稳定再检查云备份（当天没传过才传）
   refreshSidebar();

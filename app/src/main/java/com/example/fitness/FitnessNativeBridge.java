@@ -34,6 +34,64 @@ public class FitnessNativeBridge {
         Reminder.ensureChannel(app);
     }
 
+    /* ==================== 本地敏感数据加密（AES-GCM，密钥存独立 SharedPreferences 沙箱） ==================== */
+
+    private static final String PREF_SEC = "fitness_secure";
+    private static final String PREF_SEC_KEY = "aes_key_b64";
+
+    /** 取（或首次生成）AES-256 密钥：密钥与密文分文件存放，localStorage 被导出也拿不到明文 */
+    private javax.crypto.SecretKey secureKey() {
+        try {
+            android.content.SharedPreferences p = app.getSharedPreferences(PREF_SEC, Context.MODE_PRIVATE);
+            String b64 = p.getString(PREF_SEC_KEY, null);
+            if (b64 == null) {
+                javax.crypto.KeyGenerator kg = javax.crypto.KeyGenerator.getInstance("AES");
+                kg.init(256);
+                b64 = android.util.Base64.encodeToString(kg.generateKey().getEncoded(), android.util.Base64.NO_WRAP);
+                p.edit().putString(PREF_SEC_KEY, b64).apply();
+            }
+            return new javax.crypto.spec.SecretKeySpec(
+                    android.util.Base64.decode(b64, android.util.Base64.NO_WRAP), "AES");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 加密：返回 Base64(IV(12B) + AES-GCM 密文)；失败返回空串 */
+    @JavascriptInterface
+    public String encryptData(String plain) {
+        try {
+            javax.crypto.SecretKey k = secureKey();
+            if (k == null || plain == null) return "";
+            javax.crypto.Cipher c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            c.init(javax.crypto.Cipher.ENCRYPT_MODE, k);
+            byte[] iv = c.getIV();
+            byte[] ct = c.doFinal(plain.getBytes("UTF-8"));
+            byte[] out = new byte[iv.length + ct.length];
+            System.arraycopy(iv, 0, out, 0, iv.length);
+            System.arraycopy(ct, 0, out, iv.length, ct.length);
+            return android.util.Base64.encodeToString(out, android.util.Base64.NO_WRAP);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 解密：encryptData 的逆操作；失败返回空串 */
+    @JavascriptInterface
+    public String decryptData(String enc) {
+        try {
+            javax.crypto.SecretKey k = secureKey();
+            if (k == null || enc == null || enc.isEmpty()) return "";
+            byte[] in = android.util.Base64.decode(enc, android.util.Base64.NO_WRAP);
+            javax.crypto.spec.GCMParameterSpec spec = new javax.crypto.spec.GCMParameterSpec(128, in, 0, 12);
+            javax.crypto.Cipher c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            c.init(javax.crypto.Cipher.DECRYPT_MODE, k, spec);
+            return new String(c.doFinal(in, 12, in.length - 12), "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     /* ==================== JS 调用入口 ==================== */
 
     @JavascriptInterface
@@ -143,6 +201,42 @@ public class FitnessNativeBridge {
     public void downloadBackup(String cfgJson, String key) {
         CloudBackup.download(cfgJson, key, result -> runOnUi(() ->
                 activity.evalJs("window.onCloudRestoreResult && window.onCloudRestoreResult(" + JSONObject.quote(result) + ")")));
+    }
+
+    /* ==================== 本地训练日志（append-only 防误删兜底） ==================== */
+
+    /**
+     * 追加一条记录到 files/workout_log.jsonl（每次新增记录立刻调用）。
+     * 只增不删不改：records 被误删/覆盖时，日志是最后兜底。
+     * JavaBridge 线程内同步写（单行小文本，追加模式即写即落盘）。
+     */
+    @JavascriptInterface
+    public void appendWorkoutLog(String line) {
+        try {
+            java.io.File f = new java.io.File(app.getFilesDir(), "workout_log.jsonl");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+            fos.write((line + "\n").getBytes("UTF-8"));
+            fos.close();
+        } catch (Throwable t) {
+            Log.w(TAG, "appendWorkoutLog fail", t);
+        }
+    }
+
+    /** 读取全部训练日志（每行一条 JSON 记录），供「从本地日志找回」比对补回 */
+    @JavascriptInterface
+    public String readWorkoutLog() {
+        try {
+            java.io.File f = new java.io.File(app.getFilesDir(), "workout_log.jsonl");
+            if (!f.exists()) return "";
+            java.io.FileInputStream fis = new java.io.FileInputStream(f);
+            byte[] b = new byte[(int) f.length()];
+            int n = fis.read(b);
+            fis.close();
+            return n > 0 ? new String(b, "UTF-8") : "";
+        } catch (Throwable t) {
+            Log.w(TAG, "readWorkoutLog fail", t);
+            return "";
+        }
     }
 
     /* ==================== 权限查询与申请（设置页 JS 调用） ==================== */
