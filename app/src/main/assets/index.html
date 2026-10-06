@@ -101,6 +101,9 @@
     border-radius:8px; padding:8px 10px; font-size:15px; }
 
   /* 组记录列表 */
+  .workout-elapsed{ margin:6px 0 10px; padding:9px 14px; border-radius:12px; text-align:center;
+    background:rgba(120,190,120,0.14); border:1px solid var(--line); color:var(--txt); font-size:15px; }
+  .workout-elapsed b{ color:var(--acc2); font-variant-numeric:tabular-nums; font-size:17px; }
   .group-hint{ color:var(--sub); font-size:13px; margin:14px 2px 8px; display:flex; justify-content:space-between; align-items:center; }
   .group-hint .save-all{ color:var(--acc2); font-weight:600; font-size:14px; }
   .group-item{ background:var(--card2); border-radius:12px; margin-bottom:8px; overflow:hidden; }
@@ -427,6 +430,16 @@ function actionOptions(part){
   const cmp=(a,b)=>(last[b]||0)-(last[a]||0);
   return list.sort(cmp).concat(other.sort(cmp));
 }
+/* 动作建议排序：输入时「前缀匹配」排最前，其次「包含匹配」，其余保持原序（如输入“器械深”→“器械深蹲”排最前） */
+function matchedActions(part, q){
+  const all = actionOptions(part);
+  q = String(q||'').trim();
+  if(!q) return all;
+  const pref = all.filter(a=>a.startsWith(q));
+  const inc  = all.filter(a=>!a.startsWith(q) && a.includes(q));
+  const rest = all.filter(a=>!a.startsWith(q) && !a.includes(q));
+  return pref.concat(inc, rest);
+}
 /* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过）。
    records 最新在前：每个动作只看最近一次使用——新动作按该次部位学入；
    已有预设的部位也跟随最近一次使用（此前固定在首次部位，换部位练就找不到动作了） */
@@ -470,6 +483,7 @@ let state = {
   lastLapAt:0,
   groups:[],          // {idx,cumul,split,part,action,reps,weight,note,rest,t,ts}
   editingIdx:null,
+  workoutStartTs:0,   // 本次训练起点（第一组的 ts）：顶部走表计时用，清空组别时归零
   records:[],         // {id,date,t,part,action,rest,reps,weight,note,src}
   customActions:[],   // 自定义动作预设 {part,action}：手动输入过的动作自动学习
   hiddenActions:[],   // 已在设置页删除的动作（不再自动学习回来）
@@ -489,13 +503,26 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.recDraft) recDraft=Object.assign(recDraft, d.recDraft);
   if(d.autoRest!=null) state.autoRest=!!d.autoRest;
   if(d.exportCfg) state.exportCfg=sanitizeExportCfg(d.exportCfg);
+  if(d.workoutStartTs) state.workoutStartTs=d.workoutStartTs;
   // 恢复上次选择的倒计时时长（空闲态，倒计时回到完整时长）
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
   learnCustomActions();   // 按历史输入补充动作预设
 }catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); }
+function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); }
+
+/* 本次训练起点：第一组的时间戳（顶部走表计时用） */
+function workoutStart(){
+  return state.workoutStartTs || (state.groups.length? state.groups[0].ts : 0);
+}
+function updateWorkoutElapsed(){
+  const el=$('workout-elapsed'); if(!el) return;
+  const st=workoutStart();
+  if(!st){ el.style.display='none'; return; }
+  el.style.display='';
+  el.innerHTML=`⏱ 本次训练 <b>${fmt(Date.now()-st)}</b> · 已记 ${state.groups.length} 组`;
+}
 
 /* ============ 组命名：动作+第N组，换动作重新数 ============ */
 function actionGroupNo(g){
@@ -588,6 +615,7 @@ function addGroup(extra){
   if(g.rest<0) g.rest=0;
   if(g.split<0) g.split=0;
   state.groups.push(g);
+  if(state.groups.length===1) state.workoutStartTs = g.ts;   // 第一组 → 顶部走表计时开始
   state.lastLapAt = cur;
   state.editingIdx = state.groups.length-1;
   persist(); renderTimer();
@@ -644,7 +672,7 @@ function closeEdit(){
 function setAutoRest(on){ state.autoRest=!!on; persist(); renderTimer(); }
 function pickPart(i,p){ updateGroup(i,{part:p, action:''}); }
 function pickAction(i,a){ updateGroup(i,{action:a}); }
-function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; persist(); renderTimer(); }
+function removeGroup(i){ state.groups.splice(i,1); state.groups.forEach((g,idx)=>g.idx=idx+1); state.editingIdx=null; if(state.groups.length===0) state.workoutStartTs=0; persist(); renderTimer(); }
 function cdClamp(v){ v=parseInt(v,10)||0; return Math.max(5, Math.min(3600, v)); }   // 0 秒会瞬间触发系统闹钟，故下限 5 秒
 function setCdMin(v){ state.cdTotal=cdClamp(parseInt(v,10)*60 + (state.cdTotal%60)); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
 function setCdSec(v){ state.cdTotal=cdClamp(Math.floor(state.cdTotal/60)*60 + parseInt(v,10)); state.cdLeft=state.cdTotal; persist(); renderTimer(); }
@@ -657,7 +685,7 @@ function saveGroupsToHistory(){
       part:g.part, action:g.action, rest:g.rest!=null? g.rest : Math.round(g.split/1000),
       reps:g.reps, weight:g.weight, note:g.note });
   });
-  state.groups=[]; state.editingIdx=null;
+  state.groups=[]; state.editingIdx=null; state.workoutStartTs=0;
   learnCustomActions();   // 新出现的动作 → 变成动作预设
   appendTodayTags(valid.map(g=>g.part));   // 部位标签补进当天笔记（热力图）
   persist(); renderTrain();
@@ -691,8 +719,8 @@ function renderGroupEdit(i){
   return `<div class="group-edit">
     <div class="field-label">部位</div>
     <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
-    <div class="field-label">动作（点选预设，也可自己打）</div>
-    <div class="chips">${actionOptions(g.part).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
+    <div class="field-label">动作（点选预设，也可自己打；输入时匹配的动作排最前）</div>
+    <div class="chips">${matchedActions(g.part, g.action).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
     <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
     <div class="row2" style="margin-top:10px">
       <div style="flex:1"><div class="field-label">次数 (RM)</div>
@@ -718,7 +746,8 @@ function setTrainSub(sub){ state.trainSub=sub; renderTrain(); }
 function renderTrain(){
   captureFocus();
   const sub=state.trainSub;
-  let html=`<h2>🏋️ 训练</h2>`;
+  let html=`<h2>🏋️ 训练</h2>
+    <div class="workout-elapsed" id="workout-elapsed" style="display:none"></div>`;
   if(sub==='export'){
     html+=`<div class="btn-row" style="margin-bottom:6px">
       <button class="btn btn-ghost" onclick="setTrainSub('timer')">← 返回计时器</button>
@@ -729,6 +758,7 @@ function renderTrain(){
   }
   $('app').innerHTML=html;
   restoreFocus();
+  updateWorkoutElapsed();   // 渲染后立即刷新一次走表（之后由 init 的 1 秒定时器持续走）
 }
 function renderTimer(){ if(state.tab==='train') renderTrain(); }
 function renderTimerContent(){
@@ -843,9 +873,9 @@ function renderRecordSection(){
       <div class="chips" style="margin-top:8px">${REST_OPTIONS.map(r=>`<span class="chip ${d.rest==r?'on':''}" onclick="recDraft.rest=${r};renderTimer()">${fmtRest(r)||r+'秒'}</span>`).join('')}</div>
       <div class="field-label">部位</div>
       <div class="chips">${PARTS.map(p=>`<span class="chip ${d.part===p?'on':''}" onclick="recPickPart('${p}')">${p}</span>`).join('')}</div>
-      <div class="field-label">动作</div>
-      <div class="chips">${actionOptions(d.part).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
-      <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview()">
+      <div class="field-label">动作（输入时匹配的动作排最前）</div>
+      <div class="chips" id="rec-action-chips">${matchedActions(d.part, d.action).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
+      <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview();refreshRecActionChips()">
       <div class="row2" style="margin-top:12px">
         <div style="flex:1"><div class="field-label">次数(RM)</div>
           <input class="inline-input" type="text" inputmode="numeric" placeholder="7" value="${d.reps||''}" oninput="recDraft.reps=this.value;updateRecPreview()"></div>
@@ -881,6 +911,11 @@ function renderRecordSection(){
 function toggleManual(){ showManual=!showManual; persist(); renderTimer(); }
 function recPickPart(p){ recDraft.part=p; if(!actionOptions(p).includes(recDraft.action)) recDraft.action=''; persist(); renderTimer(); }
 function recPickAction(a){ recDraft.action=a; persist(); renderTimer(); }
+/* 手动补录：输入动作时只局部刷新建议 chips（不整页重渲染，焦点/键盘不丢） */
+function refreshRecActionChips(){
+  const el=$('rec-action-chips'); if(!el) return;
+  el.innerHTML = matchedActions(recDraft.part, recDraft.action).map(a=>`<span class="chip ${recDraft.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('');
+}
 function addManual(){
   const d=recDraft;
   if(!d.part && !d.action && !d.reps && !d.note){ alert('至少填个动作吧'); return; }
@@ -1107,7 +1142,7 @@ function exportToNoteAndReset(){
   persistNotes();
   Native.cancelCountdown();
   state.running=false; clearInterval(timerId);
-  state.groups=[]; state.editingIdx=null;
+  state.groups=[]; state.editingIdx=null; state.workoutStartTs=0;
   state.elapsed=0; state.lastLapAt=0; state.cdLeft=state.cdTotal;
   persist();
   renderTrain();
@@ -1659,11 +1694,33 @@ function permBadge(ok){
   if(ok===false) return '<span class="p-state no">未授权</span>';
   return '<span class="p-state no">—</span>';
 }
+let setTab='general', setQuery='';   // 设置页：当前 tab（general=通用 / actions=动作预设）+ 搜索词
+function setSetTab(t){ setTab=t; setQuery=''; renderSettings(); }
 function renderSettings(){
+  captureFocus();
   const p=permState();
   const isNative=!!(window.FitnessNative && window.FitnessNative.fire);
+  const q=setQuery.trim().toLowerCase();
+  const hit=kw=>!q || kw.toLowerCase().includes(q);   // 搜索词为空 = 全部显示
+  const kwPerm='权限 通知 锁屏 全屏 弹窗 通道 精确闹钟 电池 自启动 悬浮窗 震动 小米 澎湃 授权 提醒 后台弹出 省电 重新检查 测试系统提醒';
+  const kwSound='闹铃声音 铃声 声音 场景 试听 统一铃声 提醒音 按场景设置';
+  const kwExport='导出记录格式 导出 格式 分隔符 字段 字段顺序 首行 字段名 自定义分隔符';
+  const kwHelp='帮助 常见问题 为什么 没有提醒 不提醒 排查 前台服务 勿扰';
+  const kwActions='动作预设 预设 动作 新增 改名 删除 部位 学习 '+ state.customActions.map(c=>c.action).join(' ') +' '+ Object.values(ACTIONS).flat().join(' ');
+  const visGeneralSubs = q ? (hit(kwPerm)||hit(kwSound)||hit(kwExport)) : (setTab==='general');
+  const visHelp = q ? hit(kwHelp) : (setTab==='general');
+  const visActions = q ? hit(kwActions) : (setTab==='actions');
+  const subSt = kw => (q && !hit(kw)) ? ' style="display:none"' : '';
+  const subCss = kw => (q && !hit(kw)) ? ';display:none' : '';
   let html=`<h2>⚙ 设置</h2>
-    <div class="card">
+    <input class="inline-input" data-fid="set-search" placeholder="🔍 搜索所有设置项（如：铃声 / 动作 / 通知 / 导出）" value="${escHtml(setQuery)}" oninput="setQuery=this.value;renderSettings()">
+    <div class="chips" style="margin-top:8px">
+      <span class="chip ${setTab==='general'?'on':''}" onclick="setSetTab('general')">⚙ 通用</span>
+      <span class="chip ${setTab==='actions'?'on':''}" onclick="setSetTab('actions')">🎯 动作预设</span>
+    </div>`;
+  if(visGeneralSubs){
+  html+=`<div class="card" style="margin-top:12px">
+    <div${subSt(kwPerm)}>
       <div class="field-label">系统权限检查（倒计时结束的提醒依赖以下权限）</div>
       <div class="perm-item">
         <div class="p-info"><div class="p-name">通知提醒</div>
@@ -1716,6 +1773,8 @@ function renderSettings(){
           <button class="btn btn-ghost" style="padding:5px 10px;margin:0" onclick="askReminderSettings()">应用详情 / 省电策略</button>
         </div>
       </div>`:''}
+    </div>
+    <div${subSt(kwSound)}>
       <div class="field-label" style="margin-top:14px">闹铃声音 <span style="color:#666;font-size:12px">（15 种铃声，可按场景单独设置）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">统一铃声（点一下应用到所有场景）</div>
       <div class="chips">
@@ -1733,12 +1792,14 @@ function renderSettings(){
           </div>
         `).join('')}
       </div>
+    </div>
+    <div${subSt(kwExport)}>
       <div class="field-label" style="margin-top:14px">导出记录格式 <span style="color:#666;font-size:12px">（字段顺序 + 分隔符；导出页按此生成预览和复制内容）</span></div>
       <div class="field-label" style="font-size:12px;color:#666;margin-top:8px">字段之间的分隔符</div>
       <div class="chips">
         ${DELIM_OPTIONS.map(o=>`<span class="chip ${state.exportCfg.delim===o.k?'on':''}" onclick="setDelim('${o.k}')">${o.label}</span>`).join('')}
       </div>
-      ${state.exportCfg.delim==='custom'? `<input class="inline-input" style="margin-top:8px" placeholder="输入自定义分隔符，如： = " value="${escHtml(state.exportCfg.custom||'')}" oninput="setCustomDelim(this.value)">` : ''}
+      ${state.exportCfg.delim==='custom'? `<input class="inline-input" data-fid="custom-delim" style="margin-top:8px" placeholder="输入自定义分隔符，如： = " value="${escHtml(state.exportCfg.custom||'')}" oninput="setCustomDelim(this.value)">` : ''}
       <div class="field-label" style="font-size:12px;color:#666;margin-top:12px">字段顺序（勾选要导出的字段，▲/▼ 调整顺序）</div>
       <div class="exp-field-list">
         ${state.exportCfg.order.map((k,i)=>`
@@ -1754,12 +1815,25 @@ function renderSettings(){
       <div style="margin-top:10px;font-size:14px;color:var(--txt)">
         <label><input type="checkbox" ${state.exportCfg.header?'checked':''} onchange="setHeader(this.checked)"> 首行输出字段名</label>
       </div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
-        <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
-      </div>
     </div>
-    <div class="card">
+    <div class="btn-row" style="margin-top:14px${subCss(kwPerm)}">
+      <button class="btn btn-ghost" onclick="renderSettings()">↺ 重新检查</button>
+      <button class="btn btn-primary" onclick="testReminder()">🔔 测试系统提醒</button>
+    </div>
+  </div>`;
+  }
+  if(visHelp){
+  html+=`<div class="card" style="background:var(--card2)${subCss(kwHelp)}">
+      <div class="field-label">为什么休息结束没有系统提醒？</div>
+      <p style="color:var(--sub);font-size:13px;line-height:1.7">
+        ${isNative? '当前为安卓 App：倒计时期间会启动「前台服务」保活，到点由前台服务 + 系统精确闹钟双通道触发，锁屏/退后台也会提醒；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
+        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」和「后台弹出界面」（否则锁屏弹不出提醒页面）；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
+        点「测试系统提醒」可立即验证整条链路。
+      </p>
+    </div>`;
+  }
+  if(visActions){
+  html+=`<div class="card">
       <div class="field-label">动作预设 <span style="color:var(--sub);font-size:12px">（记录里输入过的动作会自动学习成预设；可新增、改名、删除）</span></div>
       <div class="field-label" style="font-size:12px;color:var(--sub)">＋ 新增预设</div>
       <input class="inline-input" placeholder="输入动作名，如：臀桥" value="${escHtml(actionAddDraft)}" oninput="actionAddDraft=this.value">
@@ -1769,16 +1843,13 @@ function renderSettings(){
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="addActionPreset()">＋ 添加动作预设</button>
       ${renderActionPresetList()}
-    </div>
-    <div class="card" style="background:var(--card2)">
-      <div class="field-label">为什么休息结束没有系统提醒？</div>
-      <p style="color:var(--sub);font-size:13px;line-height:1.7">
-        ${isNative? '当前为安卓 App：倒计时期间会启动「前台服务」保活，到点由前台服务 + 系统精确闹钟双通道触发，锁屏/退后台也会提醒；' : '当前为浏览器预览，浏览器无法调用安卓系统提醒音，只能播放网页提示音；'}
-        若仍不提醒，按顺序检查：① 通知权限已授权；② 「全屏通知」已打开（锁屏弹窗依赖它）；③ 「精确闹钟」已授权；④ 电池优化设为「无限制」，小米/红米还须在「设置 → 应用 → 本应用」开启「自启动」和「后台弹出界面」（否则锁屏弹不出提醒页面）；⑤ 勿扰模式未拦截、闹钟/媒体音量未静音。
-        点「测试系统提醒」可立即验证整条链路。
-      </p>
     </div>`;
+  }
+  if(q && !visGeneralSubs && !visHelp && !visActions){
+    html+=`<div class="empty" style="margin-top:16px">没有匹配「${escHtml(setQuery)}」的设置项</div>`;
+  }
   $('app').innerHTML=html;
+  restoreFocus();
 }
 function askNotif(){
   try{
@@ -2717,6 +2788,7 @@ function switchTab(tab){
 function init(){
   load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
   refreshSidebar();
+  setInterval(updateWorkoutElapsed, 1000);   // 顶部走表：只要训练页有第一组就每秒刷新（不依赖计时器是否 running）
   const sc = Native.getSoundConfig();
   if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }
   const verEl=$('app-version');
