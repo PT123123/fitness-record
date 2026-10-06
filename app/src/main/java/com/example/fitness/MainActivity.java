@@ -56,6 +56,9 @@ public class MainActivity extends Activity {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT));
         setContentView(web);
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);   // 仅 debuggable 包（debug 构建）：允许 adb 端口转发后用 DevTools 检查/注入
+        }
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);                      // 必须：JS 桥接

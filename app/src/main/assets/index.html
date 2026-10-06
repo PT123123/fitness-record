@@ -1933,65 +1933,6 @@ function migrateRecordsToNotes(){
     persistNotes();
   }catch(e){}
 }
-/* —— 旧版导出笔记回补训练历史 ——
-   1.2.9 之前「重置并导出到笔记」只写纯文本、不写 records：动作学不进预设、历史/热力图都缺。
-   启动时扫描「🏋️ 训练记录」格式笔记，把组记录反解析回填 records（幂等：只跑一次 +
-   同日期+动作+次数已存在则跳过；解析不出的行忽略） */
-const NOTE_TRAINING_RECOVERED_LS = 'fitness_note_training_recovered_v1';
-/* 反解析 fmtRecordLine 生成的行：休息X分钟/秒，[部位] 动作 重量kg*次数下，笔记。
-   note 永远以「，」分隔且在最后；重量/次数在动作名之后（末尾锚定，动作名本身可能含空格） */
-function parseRecordLine(line){
-  let s=String(line||'').trim(), rest=null, part='';
-  let m=s.match(/^休息(\d+(?:\.\d+)?)分钟，/);
-  if(m){ rest=Math.round(parseFloat(m[1])*60); s=s.slice(m[0].length); }
-  else { m=s.match(/^休息(\d+)秒，/); if(m){ rest=parseInt(m[1],10); s=s.slice(m[0].length); } }
-  m=s.match(/^\[(胸|背|腿|肩|腹)\]\s*/);
-  if(m){ part=m[1]; s=s.slice(m[0].length); }
-  let left=s, note='';
-  const ci=s.indexOf('，');
-  if(ci>=0){ note=s.slice(ci+1); left=s.slice(0,ci); }
-  if(note.endsWith('（来自笔记）')) note=note.slice(0,-'（来自笔记）'.length);
-  let weight='', reps='';
-  m=left.match(/ (\d+(?:\.\d+)?)kg\*(\d+(?:\.\d+)?)下$/);
-  if(m){ weight=m[1]; reps=m[2]; left=left.slice(0,m.index); }
-  else {
-    m=left.match(/ (\d+(?:\.\d+)?)下$/);
-    if(m){ reps=m[1]; left=left.slice(0,m.index); }
-    else { m=left.match(/ (\d+(?:\.\d+)?)kg$/); if(m){ weight=m[1]; left=left.slice(0,m.index); } }
-  }
-  return { part, action:left.trim(), weight, reps, rest, note };
-}
-function recoverNoteTrainings(){
-  try{
-    if(localStorage.getItem(NOTE_TRAINING_RECOVERED_LS)==='1') return;
-    localStorage.setItem(NOTE_TRAINING_RECOVERED_LS,'1');   // 先标记，防中断重跑
-    let added=0;
-    const existing=state.records.map(r=>(r.date||'')+'|'+(r.action||'')+'|'+String(r.reps||''));   // 仅对迁移前已有记录去重；同一次训练里同参数的组照常保留
-    for(let i=notes.length-1;i>=0;i--){          // 旧笔记先回补，保持历史按时间排列
-      const n=notes[i];
-      if(!n || !n.createdAt || !/^🏋️ 训练记录 ·/.test(String(n.content||''))) continue;
-      const dm=String(n.content).match(/训练记录 ·\s*(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if(!dm) continue;
-      const date=dm[1]+'-'+String(dm[2]).padStart(2,'0')+'-'+String(dm[3]).padStart(2,'0');
-      const sm=String(n.content).match(/开始记录：(\d{1,2}):(\d{2})/);
-      const t=sm? String(sm[1]).padStart(2,'0')+':'+sm[2] : '';
-      const d0=new Date(date+'T'+(t||'12:00')+':00');
-      const ts=!isNaN(d0)? d0.getTime() : (n.createdAt||0);
-      String(n.content).split('\n').forEach(line=>{
-        const lm=line.match(/^\s*(\d+)\.\s+(.+)$/);
-        if(!lm) return;
-        if(/^第\d+组 · /.test(lm[2])) return;    // 空组行（无动作数据）
-        const p=parseRecordLine(lm[2]);
-        if(!p.action) return;
-        if(existing.includes(date+'|'+p.action+'|'+p.reps)) return;   // 迁移前已存在 → 视为已补
-        state.records.unshift({ id:uid(), date, t, src:'note', ts,
-          part:p.part, action:p.action, rest:p.rest!=null? p.rest:'', reps:p.reps, weight:p.weight, note:p.note });
-        added++;
-      });
-    }
-    if(added){ learnCustomActions(); persist(); }   // 回补的动作 → 进预设；热力图随 persist 同步
-  }catch(e){}
-}
 function noteTitle(n){ const line=(n.content||'').split('\n').find(x=>x.trim()); return line? line.trim() : '无标题'; }
 function notePreview(n){ const lines=(n.content||'').split('\n').map(x=>x.trim()).filter(Boolean); return lines.slice(1).join(' '); }
 function fmtNoteTime(ts){ if(!ts) return ''; const d=new Date(ts); const diff=Date.now()-ts;
@@ -2651,7 +2592,7 @@ function switchTab(tab){
 
 /* ============ 初始化 ============ */
 function init(){
-  load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); recoverNoteTrainings(); syncHeatmap(); renderTrain(); tick();
+  load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
   refreshSidebar();
   const sc = Native.getSoundConfig();
   if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }
