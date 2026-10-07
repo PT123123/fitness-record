@@ -406,6 +406,14 @@ function noteSuggestChips(curValue, onclickFn){
 
 /* ============ 动作预设（内置 + 历史学习，按最近使用排序）============ */
 function builtinActionSet(){ const s=new Set(); Object.keys(ACTIONS).forEach(p=>ACTIONS[p].forEach(a=>s.add(a))); return s; }
+/* 动作名合法性：只允许 汉字 / 字母 / 空格，数字和符号一律非法。
+   防止笔记解析残留（如「第8组 · 23:20 · +00:15」「5kg*8下」）混进动作建议和预设 */
+function isValidActionName(a){
+  a=String(a||'').trim();
+  if(!a) return false;
+  if(/[0-9\uFF10-\uFF19]/.test(a)) return false;                                    // 半角/全角数字
+  return !/[^\u4e00-\u9fff\u3400-\u4dbfA-Za-z\uFF21-\uFF3A\uFF41-\uFF5A\s]/.test(a); // 只留 汉字/字母/空格，其余都算符号
+}
 /* 记录发生时间：优先 ts，旧记录没有 ts 就按 date + t 还原 */
 function recTs(r){
   if(r.ts) return +r.ts||0;
@@ -435,7 +443,7 @@ function actionOptions(part){
   const list=[], other=[];
   (ACTIONS[part]||[]).forEach(a=>{ if(a && !list.includes(a)) list.push(a); });
   const add=(a,p)=>{
-    a=String(a||'').trim(); if(!a || list.includes(a) || other.includes(a)) return;
+    a=String(a||'').trim(); if(!a || !isValidActionName(a) || list.includes(a) || other.includes(a)) return;
     if(!part || !p || p===part) list.push(a); else other.push(a);
   };
   state.customActions.forEach(c=>add(c.action, c.part));
@@ -456,6 +464,24 @@ function matchedActions(part, q){
   const rest = all.filter(a=>!a.startsWith(q) && !a.includes(q));
   return pref.concat(inc, rest);
 }
+/* 动作建议 chips 折叠：默认最多显示 8 项，多出的折进「▸ 展开全部 N」，点一下展开 / 「▴ 收起」收起。
+   折叠时若当前已填的动作不在前 8 里，额外带上它（保证当前选中可见）。
+   组编辑（g）与手动补录（rec）各记一个展开状态 */
+const ACTION_CHIPS_MAX = 8;
+let gChipsOpen = false, recChipsOpen = false;
+function toggleActionChips(which){ if(which==='rec'){ recChipsOpen=!recChipsOpen; } else { gChipsOpen=!gChipsOpen; } renderTimer(); }
+function actionChipsHtml(list, cur, expanded, which, mkOnclick){
+  let vis=list, toggle='';
+  if(list.length>ACTION_CHIPS_MAX){
+    if(expanded){ toggle=`<span class="chip" onclick="toggleActionChips('${which}')">▴ 收起</span>`; }
+    else{
+      vis=list.slice(0,ACTION_CHIPS_MAX);
+      if(cur && !vis.includes(cur)) vis=vis.concat([cur]);
+      toggle=`<span class="chip" onclick="toggleActionChips('${which}')">▸ 展开全部 ${list.length}</span>`;
+    }
+  }
+  return vis.map(a=>`<span class="chip ${cur===a?'on':''}" onclick="${mkOnclick(a)}">${a}</span>`).join('')+toggle;
+}
 /* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过）。
    records 最新在前：每个动作只看最近一次使用——新动作按该次部位学入；
    已有预设的部位也跟随最近一次使用（此前固定在首次部位，换部位练就找不到动作了） */
@@ -466,7 +492,7 @@ function learnCustomActions(){
   const seen=new Set();
   state.records.forEach(r=>{
     const a=r.action && String(r.action).trim();
-    if(!a || seen.has(a)) return;
+    if(!a || seen.has(a) || !isValidActionName(a)) return;   // 非法名（数字/符号）不学习
     seen.add(a);
     if(builtin.has(a) || hidden.has(a)) return;
     const i=idx.get(a);
@@ -526,6 +552,9 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   if(d.cdTotal){ const cd=parseInt(d.cdTotal,10); if(!isNaN(cd) && cd>0 && cd<=3600){ state.cdTotal=cd; state.cdLeft=cd; } }
   // 兼容旧组：补上 rest / t
   state.groups.forEach(g=>{ if(g.rest==null) g.rest=Math.round((g.split||0)/1000); if(!g.t) g.t=nowTime(); });
+  // 清洗：预设里含数字/符号的非法动作名（笔记解析残留）一次性剔除，不进建议也不再学习
+  state.customActions=state.customActions.filter(c=>c && isValidActionName(c.action));
+  state.hiddenActions=state.hiddenActions.filter(a=>isValidActionName(a));
   learnCustomActions();   // 按历史输入补充动作预设
 }catch(e){} }
 function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, endedDate:state.endedDate, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); syncWorkoutLog(); scheduleCloudBackup(); }
@@ -754,7 +783,7 @@ function renderGroupEdit(i){
     <div class="field-label">部位</div>
     <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
     <div class="field-label">动作（点选预设，也可自己打；输入时匹配的动作排最前）</div>
-    <div class="chips">${matchedActions(g.part, g.action).map(a=>`<span class="chip ${g.action===a?'on':''}" onclick="pickAction(${i},'${a}')">${a}</span>`).join('')}</div>
+    <div class="chips">${actionChipsHtml(matchedActions(g.part, g.action), g.action, gChipsOpen, 'g', a=>`pickAction(${i},'${a}')`)}</div>
     <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
     <div class="row2" style="margin-top:10px">
       <div style="flex:1"><div class="field-label">次数 (RM)</div>
@@ -908,7 +937,7 @@ function renderRecordSection(){
       <div class="field-label">部位</div>
       <div class="chips">${PARTS.map(p=>`<span class="chip ${d.part===p?'on':''}" onclick="recPickPart('${p}')">${p}</span>`).join('')}</div>
       <div class="field-label">动作（输入时匹配的动作排最前）</div>
-      <div class="chips" id="rec-action-chips">${matchedActions(d.part, d.action).map(a=>`<span class="chip ${d.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('')}</div>
+      <div class="chips" id="rec-action-chips">${actionChipsHtml(matchedActions(d.part, d.action), d.action, recChipsOpen, 'rec', a=>`recPickAction('${a}')`)}</div>
       <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview();refreshRecActionChips()">
       <div class="row2" style="margin-top:12px">
         <div style="flex:1"><div class="field-label">次数(RM)</div>
@@ -955,7 +984,7 @@ function recPickAction(a){ recDraft.action=a; persist(); renderTimer(); }
 /* 手动补录：输入动作时只局部刷新建议 chips（不整页重渲染，焦点/键盘不丢） */
 function refreshRecActionChips(){
   const el=$('rec-action-chips'); if(!el) return;
-  el.innerHTML = matchedActions(recDraft.part, recDraft.action).map(a=>`<span class="chip ${recDraft.action===a?'on':''}" onclick="recPickAction('${a}')">${a}</span>`).join('');
+  el.innerHTML = actionChipsHtml(matchedActions(recDraft.part, recDraft.action), recDraft.action, recChipsOpen, 'rec', a=>`recPickAction('${a}')`);
 }
 function addManual(){
   const d=recDraft;
@@ -2035,6 +2064,7 @@ function setActionEditPart(p){ actionEditPart=p; renderSettings(); }
 function addActionPreset(){
   const name=String(actionAddDraft||'').trim();
   if(!name){ alert('先输入动作名称'); return; }
+  if(!isValidActionName(name)){ alert('动作名只能含汉字/字母/空格，不能有数字或符号'); return; }
   if(builtinActionSet().has(name)){ alert('「'+name+'」是内置动作，无需添加'); return; }
   if(state.customActions.some(c=>c.action===name)){ alert('「'+name+'」已在预设里'); return; }
   const hi=state.hiddenActions.indexOf(name); if(hi>=0) state.hiddenActions.splice(hi,1);   // 之前删过 → 重新启用
@@ -2052,6 +2082,7 @@ function saveEditAction(){
   if(!c){ actionEditIdx=-1; renderSettings(); return; }
   const name=String(actionEditDraft||'').trim();
   if(!name){ alert('名称不能为空'); return; }
+  if(!isValidActionName(name)){ alert('动作名只能含汉字/字母/空格，不能有数字或符号'); return; }
   if(name!==c.action){
     if(builtinActionSet().has(name) || state.customActions.some(x=>x!==c && x.action===name)){
       alert('「'+name+'」是内置动作或已有同名预设，换个名字'); return; }
