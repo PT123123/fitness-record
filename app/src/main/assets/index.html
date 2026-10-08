@@ -464,23 +464,45 @@ function matchedActions(part, q){
   const rest = all.filter(a=>!a.startsWith(q) && !a.includes(q));
   return pref.concat(inc, rest);
 }
-/* 动作建议 chips 折叠：默认最多显示 8 项，多出的折进「▸ 展开全部 N」，点一下展开 / 「▴ 收起」收起。
-   折叠时若当前已填的动作不在前 8 里，额外带上它（保证当前选中可见）。
-   组编辑（g）与手动补录（rec）各记一个展开状态 */
-const ACTION_CHIPS_MAX = 8;
-let gChipsOpen = false, recChipsOpen = false;
-function toggleActionChips(which){ if(which==='rec'){ recChipsOpen=!recChipsOpen; } else { gChipsOpen=!gChipsOpen; } renderTimer(); }
-function actionChipsHtml(list, cur, expanded, which, mkOnclick){
-  let vis=list, toggle='';
-  if(list.length>ACTION_CHIPS_MAX){
-    if(expanded){ toggle=`<span class="chip" onclick="toggleActionChips('${which}')">▴ 收起</span>`; }
-    else{
-      vis=list.slice(0,ACTION_CHIPS_MAX);
-      if(cur && !vis.includes(cur)) vis=vis.concat([cur]);
-      toggle=`<span class="chip" onclick="toggleActionChips('${which}')">▸ 展开全部 ${list.length}</span>`;
-    }
+/* 动作建议 chips 按行折叠：默认只显示 3 行，每点一次「▸ 展开更多」多显示 3 行，最多 9 行；
+   已到 9 行还有剩余时显示「▴ 收起」（点回 3 行）。输入动作时 matchedActions 实时刷新，
+   前缀匹配永远排在最前，所以补全建议始终落在可见的前几行里。
+   组编辑（g）与手动补录（rec）各记一个展开级别 */
+const ACTION_CHIPS_ROWS = 3;        // 每级行数
+const ACTION_CHIPS_MAX_LEVEL = 2;   // 0→3行 1→6行 2→9行
+let gChipsLevel = 0, recChipsLevel = 0;
+function toggleActionChips(which, act){
+  const up = !!act;
+  if(which==='rec'){ recChipsLevel = up ? Math.min(recChipsLevel+1, ACTION_CHIPS_MAX_LEVEL) : 0; }
+  else { gChipsLevel = up ? Math.min(gChipsLevel+1, ACTION_CHIPS_MAX_LEVEL) : 0; }
+  renderTimer();
+}
+function actionChipsHtml(list, cur, mkOnclick){
+  return list.map(a=>`<span class="chip ${cur===a?'on':''}" onclick="${mkOnclick(a)}">${a}</span>`).join('');
+}
+/* 渲染后折叠：容器里先放全部 chips，按 offsetTop 实测分行；从头数超出 (level+1)*3 行的裁掉，
+   「展开更多 / 收起」chip 追加在末尾，放不进最后一行就继续从尾部藏 chips 腾位。 */
+function foldChipsBox(id, level){
+  const box=document.getElementById(id); if(!box) return;
+  const chips=[...box.querySelectorAll('.chip:not(.chip-more)')];
+  chips.forEach(c=>c.style.display='');
+  const old=box.querySelector('.chip-more'); if(old) old.remove();
+  const maxRows=(level+1)*ACTION_CHIPS_ROWS;
+  const rowTops=()=>{ const tops=[]; let last=null; [...box.children].forEach(c=>{ if(c.style.display==='none') return; const t=c.offsetTop; if(t!==last){ tops.push(t); last=t; } }); return tops; };
+  if(rowTops().length<=maxRows) return;
+  const more=document.createElement('span');
+  more.className='chip chip-more';
+  more.textContent = level>=ACTION_CHIPS_MAX_LEVEL ? '▴ 收起' : '▸ 展开更多';
+  more.onclick = ()=>toggleActionChips(id==='rec-action-chips'?'rec':'g', level>=ACTION_CHIPS_MAX_LEVEL?0:1);
+  box.appendChild(more);
+  let guard=chips.length;
+  while(rowTops().length>maxRows && guard-->0){
+    for(let i=chips.length-1;i>=0;i--){ if(chips[i].style.display!=='none'){ chips[i].style.display='none'; break; } }
   }
-  return vis.map(a=>`<span class="chip ${cur===a?'on':''}" onclick="${mkOnclick(a)}">${a}</span>`).join('')+toggle;
+}
+function applyChipsFoldAll(){
+  foldChipsBox('group-action-chips', gChipsLevel);
+  foldChipsBox('rec-action-chips', recChipsLevel);
 }
 /* 从历史记录学习自定义动作预设（内置已有 / 已删除 / 已学过 的跳过）。
    records 最新在前：每个动作只看最近一次使用——新动作按该次部位学入；
@@ -783,7 +805,7 @@ function renderGroupEdit(i){
     <div class="field-label">部位</div>
     <div class="chips">${PARTS.map(p=>`<span class="chip ${g.part===p?'on':''}" onclick="pickPart(${i},'${p}')">${p}</span>`).join('')}</div>
     <div class="field-label">动作（点选预设，也可自己打；输入时匹配的动作排最前）</div>
-    <div class="chips">${actionChipsHtml(matchedActions(g.part, g.action), g.action, gChipsOpen, 'g', a=>`pickAction(${i},'${a}')`)}</div>
+    <div class="chips" id="group-action-chips">${actionChipsHtml(matchedActions(g.part, g.action), g.action, a=>`pickAction(${i},'${a}')`)}</div>
     <input class="inline-input" ${fid('action')} placeholder="或手动输入动作，如：器械深蹲" value="${g.action||''}" oninput="updateGroup(${i},{action:this.value})">
     <div class="row2" style="margin-top:10px">
       <div style="flex:1"><div class="field-label">次数 (RM)</div>
@@ -821,6 +843,7 @@ function renderTrain(){
   }
   $('app').innerHTML=html;
   restoreFocus();
+  applyChipsFoldAll();      // 动作建议按行折叠（3行起步，点开更多）
   updateWorkoutElapsed();   // 渲染后立即刷新一次走表（之后由 init 的 1 秒定时器持续走）
 }
 function renderTimer(){ if(state.tab==='train') renderTrain(); }
@@ -937,7 +960,7 @@ function renderRecordSection(){
       <div class="field-label">部位</div>
       <div class="chips">${PARTS.map(p=>`<span class="chip ${d.part===p?'on':''}" onclick="recPickPart('${p}')">${p}</span>`).join('')}</div>
       <div class="field-label">动作（输入时匹配的动作排最前）</div>
-      <div class="chips" id="rec-action-chips">${actionChipsHtml(matchedActions(d.part, d.action), d.action, recChipsOpen, 'rec', a=>`recPickAction('${a}')`)}</div>
+      <div class="chips" id="rec-action-chips">${actionChipsHtml(matchedActions(d.part, d.action), d.action, a=>`recPickAction('${a}')`)}</div>
       <input class="inline-input" placeholder="或自己输入，如：器械深蹲" value="${d.action||''}" oninput="recDraft.action=this.value;updateRecPreview();refreshRecActionChips()">
       <div class="row2" style="margin-top:12px">
         <div style="flex:1"><div class="field-label">次数(RM)</div>
@@ -984,7 +1007,8 @@ function recPickAction(a){ recDraft.action=a; persist(); renderTimer(); }
 /* 手动补录：输入动作时只局部刷新建议 chips（不整页重渲染，焦点/键盘不丢） */
 function refreshRecActionChips(){
   const el=$('rec-action-chips'); if(!el) return;
-  el.innerHTML = actionChipsHtml(matchedActions(recDraft.part, recDraft.action), recDraft.action, recChipsOpen, 'rec', a=>`recPickAction('${a}')`);
+  el.innerHTML = actionChipsHtml(matchedActions(recDraft.part, recDraft.action), recDraft.action, a=>`recPickAction('${a}')`);
+  foldChipsBox('rec-action-chips', recChipsLevel);
 }
 function addManual(){
   const d=recDraft;
