@@ -559,7 +559,11 @@ let recDraft = { part:'', action:'', rest:60, reps:'', weight:'', note:'', t:'' 
 const LS = 'fitness_records_v5';
 let groupDefaults = { part:'', action:'', reps:'', weight:'' };
 
-function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
+let _storageHealthy=true;   // localStorage 读写是否健康：异常时暂停持久化，防止空数据覆盖旧记录
+function load(){ try{ const raw=localStorage.getItem(LS);
+  if(raw==null){ _storageHealthy=true; return; }   // 首次使用：无旧数据，正常进入空状态
+  const d=JSON.parse(raw);
+  _storageHealthy=true;
   if(d.records) state.records=d.records; if(d.groups) state.groups=d.groups;
   if(Array.isArray(d.customActions)) state.customActions=d.customActions;
   if(Array.isArray(d.hiddenActions)) state.hiddenActions=d.hiddenActions;
@@ -578,8 +582,60 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}');
   state.customActions=state.customActions.filter(c=>c && isValidActionName(c.action));
   state.hiddenActions=state.hiddenActions.filter(a=>isValidActionName(a));
   learnCustomActions();   // 按历史输入补充动作预设
-}catch(e){} }
-function persist(){ localStorage.setItem(LS, JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, endedDate:state.endedDate, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions})); syncHeatmap(); syncWorkoutLog(); scheduleCloudBackup(); }
+}catch(e){
+  // 读取/解析失败：把原始内容备份到旁路 key，绝不覆盖；本次会话暂停持久化避免空数据写回
+  _storageHealthy=false;
+  try{ const raw=localStorage.getItem(LS); if(raw) localStorage.setItem('fitness_records_v5_prev', raw); }catch(_){}
+} }
+function persist(){ if(!_storageHealthy) return;   // 存储异常时放弃写回，静默保留旧记录
+  const json = JSON.stringify({records:state.records, groups:state.groups, workoutStartTs:state.workoutStartTs, endedDate:state.endedDate, defaults:groupDefaults, showManual, recDraft, cdTotal:state.cdTotal, autoRest:state.autoRest, exportCfg:state.exportCfg, customActions:state.customActions, hiddenActions:state.hiddenActions});
+  localStorage.setItem(LS, json);
+  syncDataFile();
+  syncHeatmap(); syncWorkoutLog(); scheduleCloudBackup(); }
+
+/* ==== 结构化数据落盘镜像：每次持久化把完整快照写原生文件 files/fitness_data.json ====
+   与 WebView localStorage 完全解耦：WebView profile 被清/重建后，run-as cat 该文件即完整备份，
+   启动时还会自动回填缺失的 key（见 restoreFromDataFile）。写入合并 300ms 防抖（输入框每键触发 persist）。 */
+const DATA_KEYS = ['fitness_records_v5','fitness_hiit_v2','fitness_stair_v2','fitness_notes_v1'];
+let _dfTimer=null, _dfDirty=false;
+function syncDataFile(flush){
+  if(!(window.FitnessNative && FitnessNative.saveDataFile)) return;
+  _dfDirty=true;
+  if(_dfTimer){ clearTimeout(_dfTimer); _dfTimer=null; }
+  if(flush){ writeDataFile(); return; }
+  _dfTimer=setTimeout(function(){ _dfTimer=null; writeDataFile(); }, 300);
+}
+function writeDataFile(){
+  if(!_dfDirty || !(window.FitnessNative && FitnessNative.saveDataFile)) return;
+  _dfDirty=false;
+  try{
+    // 读旧文件做合并：localStorage 里缺失的 key 沿用文件里的旧值，避免某次局部快照把别的数据抹掉
+    let prevKeys=null;
+    try{ const r=FitnessNative.readDataFile(); if(r){ const p=JSON.parse(r); if(p && p.keys && typeof p.keys==='object') prevKeys=p.keys; } }catch(e){}
+    const keys={};
+    DATA_KEYS.forEach(function(k){
+      const v=localStorage.getItem(k);
+      if(v==null){ if(prevKeys && prevKeys[k]!=null) keys[k]=prevKeys[k]; return; }
+      try{ keys[k]=JSON.parse(v); }catch(e){ keys[k]=v; }
+    });
+    FitnessNative.saveDataFile(JSON.stringify({ app:'fitness-record', ver:window.APP_VERSION||'', ts:Date.now(), keys:keys }));
+  }catch(e){}
+}
+/* 启动兜底：localStorage 整体丢失（WebView profile 重建）或缺某个 key 时，从原生文件回填；只补不覆盖 */
+function restoreFromDataFile(){
+  if(!(window.FitnessNative && FitnessNative.readDataFile)) return;
+  try{
+    const raw=FitnessNative.readDataFile(); if(!raw) return;
+    const d=JSON.parse(raw);
+    const keys=(d && typeof d==='object' && d.keys) ? d.keys : null;
+    if(!keys){ // 兼容旧格式（直接写主 payload 的裸 JSON）
+      if(d && d.records && localStorage.getItem(LS)==null) localStorage.setItem(LS, raw);
+      return;
+    }
+    DATA_KEYS.forEach(function(k){ if(localStorage.getItem(k)!=null) return; const v=keys[k]; if(v==null) return;
+      localStorage.setItem(k, typeof v==='string' ? v : JSON.stringify(v)); });
+  }catch(e){}
+}
 
 /* 本次训练起点：第一组的时间戳（顶部走表计时用） */
 function workoutStart(){
@@ -1101,7 +1157,8 @@ function collectExportItems(){
     if(!(g.part||g.action||g.reps||g.note)) return;
     items.push({ date:trainToday(), set:i+1, t:g.t||'', rest:g.rest!=null? g.rest : Math.round(g.split/1000), part:g.part||'', action:g.action||'', reps:g.reps||'', weight:g.weight==null? '' : g.weight, note:g.note||'' });
   });
-  state.records.forEach(r=> items.push({ date:r.date, set:'', t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight==null? '' : r.weight, note:r.note||'' }));
+  // 导出 = 本次组别草稿 + 今天的已保存记录（不含历史日期；历史请在「结构化数据」查看）
+  state.records.filter(r=>r && r.date===trainToday()).forEach(r=> items.push({ date:r.date, set:'', t:r.t||'', rest:r.rest||0, part:r.part||'', action:r.action||'', reps:r.reps||'', weight:r.weight==null? '' : r.weight, note:r.note||'' }));
   return items;
 }
 function sortItems(items){
@@ -1199,7 +1256,7 @@ function renderExport(){ if(state.tab==='train') renderTrain(); }
 function renderExportContent(){
   const txt = buildExport();
   return `<div class="card">
-      <p style="color:var(--sub);font-size:14px">当前格式：${fmtExportCfg()} 可在「设置 → 导出记录格式」中修改。</p>
+      <p style="color:var(--sub);font-size:14px">仅导出今天的记录（本次组别 + 今日已保存），更早的记录请去「🗂 结构化数据」查看。<br>当前格式：${fmtExportCfg()} 可在「设置 → 导出记录格式」中修改。</p>
       <pre id="export-text">${escHtml(txt)}</pre>
       <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyExport()">📋 复制到剪贴板</button>
       <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="endTraining()">🏁 结束训练</button>
@@ -1295,7 +1352,7 @@ function loadHiit(){ try{ const d=JSON.parse(localStorage.getItem(HIIT_LS)||'{}'
   hiit.running=false; hiit.finished=false; hiit.phase='work'; hiit.currentSet=1; hiit.currentRound=1;
   hiit.phaseLeft=hiit.workSec; hiit.timerId=null;
 }catch(e){} }
-function persistHiit(){ localStorage.setItem(HIIT_LS, JSON.stringify({sessions:hiit.sessions, workSec:hiit.workSec, restSec:hiit.restSec, roundsPerSet:hiit.roundsPerSet, sets:hiit.sets, setRestSec:hiit.setRestSec})); scheduleCloudBackup(); }
+function persistHiit(){ localStorage.setItem(HIIT_LS, JSON.stringify({sessions:hiit.sessions, workSec:hiit.workSec, restSec:hiit.restSec, roundsPerSet:hiit.roundsPerSet, sets:hiit.sets, setRestSec:hiit.setRestSec})); syncDataFile(); scheduleCloudBackup(); }
 
 function setHiitTab(t){ hiit.tab=t; renderHiit(); }
 function applyHiitPreset(i){
@@ -1552,7 +1609,7 @@ function loadStair(){ try{ const d=JSON.parse(localStorage.getItem(STAIR_LS)||'{
   stair.laps=[]; stair.lapStartAt=0; stair.lapFloors=0;
   stair.restRunning=false; stair.restDone=false; stair.restTimerId=null;
 }catch(e){} }
-function persistStair(){ localStorage.setItem(STAIR_LS, JSON.stringify({sessions:stair.sessions, weight:stair.weight, restLeft:stair.restLeft})); scheduleCloudBackup(); }
+function persistStair(){ localStorage.setItem(STAIR_LS, JSON.stringify({sessions:stair.sessions, weight:stair.weight, restLeft:stair.restLeft})); syncDataFile(); scheduleCloudBackup(); }
 function stairKcal(){ return Math.round(stair.weight * stair.floors * 0.17); }
 
 function setStairTab(t){ stair.tab=t; renderStair(); }
@@ -2177,7 +2234,7 @@ let noteEditing = false;   // 笔记详情是否处于编辑模式（默认「�
 
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function loadNotes(){ try{ const d=JSON.parse(localStorage.getItem(NOTES_LS)||'[]'); if(Array.isArray(d)) notes=d; }catch(e){} }
-function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); syncHeatmap(); scheduleCloudBackup(); }
+function persistNotes(){ localStorage.setItem(NOTES_LS, JSON.stringify(notes)); syncDataFile(); syncHeatmap(); scheduleCloudBackup(); }
 
 /* —— 健身日记部位标签：#健身日记/部位（热力图数据源） —— */
 const HM_TAG_PREFIX = '健身日记/';
@@ -3244,6 +3301,7 @@ function switchTab(tab){
 
 /* ============ 初始化 ============ */
 function init(){
+  restoreFromDataFile();   // 先从原生落盘镜像回填缺失的 localStorage key（WebView profile 丢过数据时救命）
   load(); loadNotes(); loadHiit(); loadStair(); migrateRecordsToNotes(); syncHeatmap(); renderTrain(); tick();
   initWorkoutLog();   // 落盘日志：历史记录全量入册，此后每次新增立即追加
   loadBackupCfg();
@@ -3254,7 +3312,7 @@ function init(){
   if(sc && typeof sc==='object'){ for(let t=0; t<=6; t++){ if(sc[t]!==undefined) soundCfg[t]=sc[t]; } }
   const verEl=$('app-version');
   if(verEl) verEl.textContent = window.APP_VERSION ? 'v'+window.APP_VERSION : '';
-  window.addEventListener('beforeunload', persist);
+  window.addEventListener('beforeunload', function(){ persist(); syncDataFile(true); });   // 离开页面前同步落盘（不等防抖）
 }
 init();
 </script>

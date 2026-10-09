@@ -203,6 +203,57 @@ public class FitnessNativeBridge {
                 activity.evalJs("window.onCloudRestoreResult && window.onCloudRestoreResult(" + JSONObject.quote(result) + ")")));
     }
 
+    /* ==================== 结构化数据落盘镜像（每次持久化同步写原生文件，ADB 直接可拉） ==================== */
+
+    /** 文件名：完整结构化快照（fitness_records_v5 原始 JSON），与 WebView localStorage 同步写 */
+    static final String DATA_FILENAME = "fitness_data.json";
+
+    /**
+     * 把完整结构化 JSON 原子写入 files/fitness_data.json。
+     * 与 localStorage 解耦：即使 WebView profile 被清/重建，run-as cat 该文件即可拿到完整备份。
+     * 每次 persist() 调用，普通体量（几十 KB）即写即落盘。
+     */
+    @JavascriptInterface
+    public void saveDataFile(String json) {
+        try {
+            if (json == null) return;
+            java.io.File f = new java.io.File(app.getFilesDir(), DATA_FILENAME);
+            java.io.File tmp = new java.io.File(app.getFilesDir(), DATA_FILENAME + ".tmp");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp, false);
+            fos.write(json.getBytes("UTF-8"));
+            fos.flush();
+            fos.getFD().sync();          // 强制落盘，防进程被杀时丢内容
+            fos.close();
+            if (!tmp.renameTo(f)) {       // 原子替换，避免半截文件
+                java.io.FileOutputStream fo2 = new java.io.FileOutputStream(f, false);
+                fo2.write(json.getBytes("UTF-8"));
+                fo2.flush();
+                fo2.getFD().sync();
+                fo2.close();
+                tmp.delete();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "saveDataFile fail", t);
+        }
+    }
+
+    /** 读取结构化落盘镜像（恢复/排查用），返回原始 JSON；无文件返回空串 */
+    @JavascriptInterface
+    public String readDataFile() {
+        try {
+            java.io.File f = new java.io.File(app.getFilesDir(), DATA_FILENAME);
+            if (!f.exists()) return "";
+            java.io.FileInputStream fis = new java.io.FileInputStream(f);
+            byte[] b = new byte[(int) f.length()];
+            int n = fis.read(b);
+            fis.close();
+            return n > 0 ? new String(b, "UTF-8") : "";
+        } catch (Throwable t) {
+            Log.w(TAG, "readDataFile fail", t);
+            return "";
+        }
+    }
+
     /* ==================== 本地训练日志（append-only 防误删兜底） ==================== */
 
     /**

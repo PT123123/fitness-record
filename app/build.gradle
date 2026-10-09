@@ -20,14 +20,17 @@ android {
         applicationId "com.example.fitness"
         minSdk 26                 // Android 8.0+（悬浮窗/锁屏弹窗所需 API 均覆盖）
         targetSdk 34
-        versionCode 138           // 与版本号 1.2.18 对应
-        versionName "1.2.18"
+        versionCode 139           // 与版本号 1.2.19 对应
+        versionName "1.2.19"
     }
 
     buildTypes {
         release {
             minifyEnabled false   // 先关闭混淆，方便调试；上线可开启
             signingConfig signingConfigs.release   // 统一用共用 debug.keystore（仓库外密钥库）签名
+        }
+        debug {
+            signingConfig signingConfigs.release   // debug 包也用同一 keystore，可覆盖安装 release 包且保留数据
         }
     }
 
